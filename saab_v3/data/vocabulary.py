@@ -1,6 +1,8 @@
 """High-performance vocabulary for mapping tokens to indices."""
 
+import json
 from collections import Counter
+from pathlib import Path
 import heapq
 
 from saab_v3.data.constants import UNK_TOKEN
@@ -122,3 +124,46 @@ class Vocabulary:
     def __contains__(self, token: str) -> bool:
         """Check if token is in vocabulary."""
         return token in self.token_to_idx
+
+    def save(self, path: str | Path) -> None:
+        """Save vocabulary to JSON file.
+
+        Args:
+            path: Path to save vocabulary JSON file
+        """
+        path = Path(path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        data = {
+            "special_tokens": self.special_tokens,
+            "token_to_idx": self.token_to_idx,
+            "idx_to_token": self.idx_to_token,
+            "_is_built": self._is_built,
+        }
+
+        with open(path, "w") as f:
+            json.dump(data, f, indent=2)
+
+    @classmethod
+    def load(cls, path: str | Path) -> "Vocabulary":
+        """Load vocabulary from JSON file.
+
+        Args:
+            path: Path to vocabulary JSON file
+
+        Returns:
+            Vocabulary instance with loaded data
+        """
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"Vocabulary file not found: {path}")
+
+        with open(path, "r") as f:
+            data = json.load(f)
+
+        vocab = cls(special_tokens=data["special_tokens"])
+        vocab.token_to_idx = data["token_to_idx"]
+        vocab.idx_to_token = data["idx_to_token"]
+        vocab._is_built = data["_is_built"]
+
+        return vocab

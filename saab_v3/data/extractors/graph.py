@@ -2,11 +2,7 @@
 
 from typing import Any
 
-try:
-    import networkx as nx
-except ImportError:
-    nx = None
-
+import networkx as nx
 from tqdm import tqdm
 
 from saab_v3.data.extractors.base import StructuralExtractor
