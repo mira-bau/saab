@@ -7,6 +7,9 @@ from saab_v3.data.structures import (
     Token,
     TokenizedSequence,
 )
+from saab_v3.data.vocabulary import Vocabulary
+from saab_v3.data.tokenizer import ValueTokenizer
+from saab_v3.data.tag_encoder import TagEncoder
 
 __all__ = [
     "Batch",
@@ -14,4 +17,7 @@ __all__ = [
     "StructureTag",
     "Token",
     "TokenizedSequence",
+    "Vocabulary",
+    "ValueTokenizer",
+    "TagEncoder",
 ]

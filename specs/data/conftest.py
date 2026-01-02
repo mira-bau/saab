@@ -130,3 +130,80 @@ def sample_graph_with_attributes():
     graph.add_edge(1, 2, weight=1.5, label="edge1")
     graph.add_edge(2, 3, weight=2.0, label="edge2")
     return graph
+
+
+# ============================================================================
+# Tokenization Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def sample_vocabulary():
+    """Pre-built vocabulary for testing."""
+    from saab_v3.data.vocabulary import Vocabulary
+    from saab_v3.data.constants import VALUE_SPECIAL_TOKENS
+
+    vocab = Vocabulary(special_tokens=VALUE_SPECIAL_TOKENS)
+    tokens = ["hello", "world", "hello", "test", "world", "python"]
+    vocab.build_from_tokens(tokens)
+    return vocab
+
+
+@pytest.fixture
+def sample_tokenized_sequences():
+    """Sample TokenizedSequence objects for tokenizer/encoder testing."""
+    from saab_v3.data.structures import TokenizedSequence, Token, StructureTag
+
+    seq1 = TokenizedSequence(
+        tokens=[
+            Token(
+                value="Alice",
+                structure_tag=StructureTag(field="name", entity="user_1"),
+                position=0,
+            ),
+            Token(
+                value="25",
+                structure_tag=StructureTag(field="age", entity="user_1"),
+                position=1,
+            ),
+        ],
+        sequence_id="seq1",
+    )
+
+    seq2 = TokenizedSequence(
+        tokens=[
+            Token(
+                value="Bob",
+                structure_tag=StructureTag(field="name", entity="user_2"),
+                position=0,
+            ),
+            Token(
+                value="30",
+                structure_tag=StructureTag(field="age", entity="user_2"),
+                position=1,
+            ),
+        ],
+        sequence_id="seq2",
+    )
+
+    return [seq1, seq2]
+
+
+@pytest.fixture
+def sample_structure_tags():
+    """Various structure tags for testing."""
+    from saab_v3.data.structures import StructureTag
+
+    return {
+        "minimal": StructureTag(field="name"),
+        "multiple": StructureTag(field="name", entity="user_1", token_type="text"),
+        "all_fields": StructureTag(
+            field="name",
+            entity="user_1",
+            time="2023-Q1",
+            edge="parent_of",
+            role="primary_key",
+            token_type="text",
+        ),
+        "missing_fields": StructureTag(field="name", entity="user_1"),
+    }
