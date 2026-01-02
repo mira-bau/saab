@@ -6,14 +6,16 @@ authors = [
     {name = "mira-bau",email = "amira.benamara@bahcesehir.edu.tr"}
 ]
 readme = "README.md"
-requires-python = ">=3.12,<3.15"
+requires-python = ">=3.12,<3.14.1"
 dependencies = [
     "torch (>=2.9.1,<3.0.0)",
     "pandas (>=2.3.3,<3.0.0)",
     "numpy (>=2.4.0,<3.0.0)",
     "tqdm (>=4.67.1,<5.0.0)",
     "pyyaml (>=6.0.3,<7.0.0)",
-    "pydantic (>=2.12.5,<3.0.0)"
+    "pydantic (>=2.12.5,<3.0.0)",
+    "networkx (>=3.6.1,<4.0.0)",
+    "hypothesis (>=6.148.9,<7.0.0)"
 ]
 
 
