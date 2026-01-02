@@ -143,7 +143,7 @@ class Preprocessor:
             )
 
         # Use provided schema or config schema
-        schema = schema or self.config.schema
+        schema = schema or self.config.extractor_schema
 
         # Auto-detect format and select extractor
         self._selected_extractor = self._auto_detect_extractor(train_data)
@@ -181,7 +181,7 @@ class Preprocessor:
             List of TokenizedSequence objects
         """
         # Use provided schema or config schema
-        schema = schema or self.config.schema
+        schema = schema or self.config.extractor_schema
 
         # Select extractor (use fitted one if it can handle the data, otherwise auto-detect)
         if self._selected_extractor is not None and self._selected_extractor.can_handle(

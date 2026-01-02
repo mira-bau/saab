@@ -15,7 +15,7 @@ class PreprocessingConfig(BaseModel):
     preserve_original_tags: bool = (
         False  # True for SAAB (preserve StructureTag objects)
     )
-    schema: dict | None = None  # Optional schema for extractors
+    extractor_schema: dict | None = None  # Optional schema for extractors
     device: str = "cpu"  # "cpu", "cuda", "mps"
     data_dir: Path | None = None  # Override default data/ directory (optional)
 
