@@ -238,8 +238,8 @@ class Preprocessor:
         """Save vocabularies and config to artifacts directory.
 
         Args:
-            dataset_name: Name of dataset (creates data/artifacts/dataset_name/)
-            base_path: Optional override for data directory
+            dataset_name: Name of dataset (creates dataset/artifacts/dataset_name/)
+            base_path: Optional override for base directory (default: saab_v3/dataset/)
         """
         if not self._is_fitted:
             raise ValueError("Cannot save artifacts: Preprocessor not fitted yet.")
@@ -249,7 +249,8 @@ class Preprocessor:
             if self.config.data_dir is not None:
                 base_path = self.config.data_dir
             else:
-                base_path = Path("data")
+                # Default: dataset/artifacts relative to saab_v3 package
+                base_path = Path(__file__).parent.parent / "dataset"
 
         artifacts_dir = base_path / "artifacts" / dataset_name
         artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -283,7 +284,7 @@ class Preprocessor:
 
         Args:
             dataset_name: Name of dataset
-            base_path: Optional override for data directory
+            base_path: Optional override for base directory (default: saab_v3/dataset/)
 
         Returns:
             Preprocessor instance with loaded vocabularies
@@ -293,8 +294,8 @@ class Preprocessor:
         """
         # Determine artifacts path
         if base_path is None:
-            # Try to infer from default location
-            default_path = Path("data")
+            # Default: dataset/artifacts relative to saab_v3 package
+            default_path = Path(__file__).parent.parent / "dataset"
             artifacts_dir = default_path / "artifacts" / dataset_name
         else:
             artifacts_dir = base_path / "artifacts" / dataset_name
