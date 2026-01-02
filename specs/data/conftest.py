@@ -207,3 +207,120 @@ def sample_structure_tags():
         ),
         "missing_fields": StructureTag(field="name", entity="user_1"),
     }
+
+
+# ============================================================================
+# Batcher Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def sample_encoded_sequences(sample_tokenized_sequences):
+    """Pre-encoded sequences (TokenizedSequence, token_ids, encoded_tags) for batcher testing."""
+    from saab_v3.data import ValueTokenizer, TagEncoder
+
+    # Build tokenizer and encoder
+    tokenizer = ValueTokenizer(vocab_size=100)
+    tokenizer.build_vocab(sample_tokenized_sequences)
+
+    encoder = TagEncoder()
+    encoder.build_vocabs(sample_tokenized_sequences)
+
+    # Encode sequences
+    encoded = []
+    for seq in sample_tokenized_sequences:
+        seq_enc, token_ids = tokenizer.encode_sequence(seq)
+        seq_final, encoded_tags = encoder.encode_sequence(seq_enc)
+        encoded.append((seq_final, token_ids, encoded_tags))
+
+    return encoded
+
+
+@pytest.fixture
+def sample_encoded_sequences_different_lengths():
+    """Encoded sequences with different lengths for padding testing."""
+    from saab_v3.data.structures import TokenizedSequence, Token, StructureTag
+    from saab_v3.data import ValueTokenizer, TagEncoder
+
+    # Create sequences with different lengths
+    seq1 = TokenizedSequence(
+        tokens=[
+            Token(value="A", structure_tag=StructureTag(field="col1"), position=0),
+            Token(value="B", structure_tag=StructureTag(field="col2"), position=1),
+        ],
+        sequence_id="short",
+    )
+
+    seq2 = TokenizedSequence(
+        tokens=[
+            Token(value="X", structure_tag=StructureTag(field="col1"), position=0),
+            Token(value="Y", structure_tag=StructureTag(field="col2"), position=1),
+            Token(value="Z", structure_tag=StructureTag(field="col3"), position=2),
+            Token(value="W", structure_tag=StructureTag(field="col4"), position=3),
+        ],
+        sequence_id="long",
+    )
+
+    sequences = [seq1, seq2]
+
+    # Build tokenizer and encoder
+    tokenizer = ValueTokenizer(vocab_size=100)
+    tokenizer.build_vocab(sequences)
+
+    encoder = TagEncoder()
+    encoder.build_vocabs(sequences)
+
+    # Encode sequences
+    encoded = []
+    for seq in sequences:
+        seq_enc, token_ids = tokenizer.encode_sequence(seq)
+        seq_final, encoded_tags = encoder.encode_sequence(seq_enc)
+        encoded.append((seq_final, token_ids, encoded_tags))
+
+    return encoded
+
+
+@pytest.fixture
+def sample_encoded_sequences_with_edges_roles():
+    """Encoded sequences with edge and role tags for optional tag testing."""
+    from saab_v3.data.structures import TokenizedSequence, Token, StructureTag
+    from saab_v3.data import ValueTokenizer, TagEncoder
+
+    # Create sequences with edges and roles
+    seq1 = TokenizedSequence(
+        tokens=[
+            Token(
+                value="node1",
+                structure_tag=StructureTag(
+                    field="id", entity="graph_1", edge="connects", role="source"
+                ),
+                position=0,
+            ),
+            Token(
+                value="node2",
+                structure_tag=StructureTag(
+                    field="id", entity="graph_1", edge="connects", role="target"
+                ),
+                position=1,
+            ),
+        ],
+        sequence_id="with_edges",
+    )
+
+    sequences = [seq1]
+
+    # Build tokenizer and encoder
+    tokenizer = ValueTokenizer(vocab_size=100)
+    tokenizer.build_vocab(sequences)
+
+    encoder = TagEncoder()
+    encoder.build_vocabs(sequences)
+
+    # Encode sequences
+    encoded = []
+    for seq in sequences:
+        seq_enc, token_ids = tokenizer.encode_sequence(seq)
+        seq_final, encoded_tags = encoder.encode_sequence(seq_enc)
+        encoded.append((seq_final, token_ids, encoded_tags))
+
+    return encoded

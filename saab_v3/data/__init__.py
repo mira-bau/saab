@@ -10,6 +10,7 @@ from saab_v3.data.structures import (
 from saab_v3.data.vocabulary import Vocabulary
 from saab_v3.data.tokenizer import ValueTokenizer
 from saab_v3.data.tag_encoder import TagEncoder
+from saab_v3.data.batcher import Batcher
 
 __all__ = [
     "Batch",
@@ -20,4 +21,5 @@ __all__ = [
     "Vocabulary",
     "ValueTokenizer",
     "TagEncoder",
+    "Batcher",
 ]
