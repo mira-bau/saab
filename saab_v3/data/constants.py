@@ -19,3 +19,7 @@ NONE_IDX = 1  # For tag vocabularies
 MASK_IDX = 2
 CLS_IDX = 3
 SEP_IDX = 4
+
+# Padding tag for SAAB (placeholder StructureTag for padding positions)
+# Note: StructureTag requires at least one non-empty field, so we use PAD_TOKEN as field
+PAD_TAG_FIELD = PAD_TOKEN

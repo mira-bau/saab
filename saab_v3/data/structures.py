@@ -167,6 +167,9 @@ class Batch(BaseModel):
     token_type_ids: torch.Tensor  # [batch_size, seq_len]
     sequence_lengths: list[int]  # Actual lengths (for unpacking)
     sequence_ids: list[str] | None = None  # For tracking/debugging
+    original_tags: list[list[StructureTag]] | None = (
+        None  # [batch_size, seq_len] - Original tags for SAAB bias computation
+    )
 
     @field_validator("attention_mask")
     @classmethod
@@ -233,6 +236,18 @@ class Batch(BaseModel):
                     f"sequence_ids length ({len(self.sequence_ids)}) must match batch_size ({batch_size})"
                 )
 
+        # Validate original_tags if provided
+        if self.original_tags is not None:
+            if len(self.original_tags) != batch_size:
+                raise ValueError(
+                    f"original_tags length ({len(self.original_tags)}) must match batch_size ({batch_size})"
+                )
+            for i, tag_seq in enumerate(self.original_tags):
+                if len(tag_seq) != seq_len:
+                    raise ValueError(
+                        f"original_tags[{i}] length ({len(tag_seq)}) must match seq_len ({seq_len})"
+                    )
+
         return self
 
     @property
@@ -246,7 +261,11 @@ class Batch(BaseModel):
         return self.token_ids.shape[1]
 
     def to(self, device: torch.device) -> "Batch":
-        """Move all tensors to specified device (MPS/GPU/CPU)."""
+        """Move all tensors to specified device (MPS/GPU/CPU).
+
+        Note: original_tags are Python objects (StructureTag), not tensors,
+        so they are not moved to device and remain unchanged.
+        """
         return Batch(
             token_ids=self.token_ids.to(device),
             attention_mask=self.attention_mask.to(device),
@@ -258,4 +277,5 @@ class Batch(BaseModel):
             token_type_ids=self.token_type_ids.to(device),
             sequence_lengths=self.sequence_lengths,
             sequence_ids=self.sequence_ids,
+            original_tags=self.original_tags,  # Python objects, not moved
         )
