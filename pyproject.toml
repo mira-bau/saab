@@ -26,3 +26,9 @@ pytest = "^9.0.2"
 pytest-cov = "^7.0.0"
 matplotlib = "^3.10.8"
 
+[tool.pytest.ini_options]
+python_files = ["spec_*.py", "test_*.py"]
+python_functions = ["spec_*", "test_*"]
+python_classes = ["Spec*", "Test*"]
+testpaths = ["specs"]
+
