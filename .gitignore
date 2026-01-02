@@ -218,3 +218,5 @@ __marimo__/
 # Custom files
 .cursor/
 .DS_Store
+saab_v3/dataset/raw/*
+!saab_v3/dataset/raw/.gitkeep
