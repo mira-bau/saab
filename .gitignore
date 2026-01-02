@@ -214,4 +214,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Custom files
 .cursor/
+.DS_Store
