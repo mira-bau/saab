@@ -1,10 +1,24 @@
-"""Factory functions for creating models from preprocessor."""
+"""Factory functions for creating models from preprocessor.
+
+All factory functions automatically move models to the device specified in
+config.device (using get_device utility). This ensures consistency with the
+existing pattern where dataloader uses preprocessor config device.
+
+Example usage:
+    >>> from saab_v3.models import ModelConfig, create_flat_transformer
+    >>> config = ModelConfig(device="mps")  # or "cuda", "cpu", "auto"
+    >>> model = create_flat_transformer(preprocessor, config)
+    >>> # Model is automatically on MPS device
+    >>> # Batches from dataloader (using same preprocessor config) are also on MPS
+    >>> output = model(batch)  # Everything matches!
+"""
 
 from saab_v3.training.preprocessor import Preprocessor
 from saab_v3.models.config import ModelConfig
 from saab_v3.models.flat_transformer import FlatTransformer
 from saab_v3.models.scratch_transformer import ScratchTransformer
 from saab_v3.models.saab_transformer import SAABTransformer
+from saab_v3.utils.device import get_device
 
 
 def get_vocab_sizes(preprocessor: Preprocessor) -> dict[str, int]:
@@ -43,16 +57,24 @@ def create_flat_transformer(
 ) -> FlatTransformer:
     """Create FlatTransformer from preprocessor and config.
 
+    The model is automatically moved to the device specified in config.device
+    (using get_device utility). Ensure batches are on the same device.
+
     Args:
         preprocessor: Fitted Preprocessor instance
-        config: ModelConfig instance
+        config: ModelConfig instance with device specified
 
     Returns:
-        FlatTransformer instance
+        FlatTransformer instance on the device specified in config.device
+
+    Example:
+        >>> config = ModelConfig(device="mps")
+        >>> model = create_flat_transformer(preprocessor, config)
+        >>> # Model is now on MPS device
     """
     vocab_sizes = get_vocab_sizes(preprocessor)
 
-    return FlatTransformer(
+    model = FlatTransformer(
         d_model=config.d_model,
         num_layers=config.num_layers,
         num_heads=config.num_heads,
@@ -63,6 +85,12 @@ def create_flat_transformer(
         layer_norm_eps=config.layer_norm_eps,
         positional_learned=config.positional_learned,
     )
+
+    # Automatically move model to device specified in config
+    device = get_device(config.device)
+    model = model.to(device)
+
+    return model
 
 
 def create_scratch_transformer(
@@ -71,16 +99,24 @@ def create_scratch_transformer(
 ) -> ScratchTransformer:
     """Create ScratchTransformer from preprocessor and config.
 
+    The model is automatically moved to the device specified in config.device
+    (using get_device utility). Ensure batches are on the same device.
+
     Args:
         preprocessor: Fitted Preprocessor instance
-        config: ModelConfig instance
+        config: ModelConfig instance with device specified
 
     Returns:
-        ScratchTransformer instance
+        ScratchTransformer instance on the device specified in config.device
+
+    Example:
+        >>> config = ModelConfig(device="mps")
+        >>> model = create_scratch_transformer(preprocessor, config)
+        >>> # Model is now on MPS device
     """
     vocab_sizes = get_vocab_sizes(preprocessor)
 
-    return ScratchTransformer(
+    model = ScratchTransformer(
         d_model=config.d_model,
         num_layers=config.num_layers,
         num_heads=config.num_heads,
@@ -91,6 +127,12 @@ def create_scratch_transformer(
         layer_norm_eps=config.layer_norm_eps,
         positional_learned=config.positional_learned,
     )
+
+    # Automatically move model to device specified in config
+    device = get_device(config.device)
+    model = model.to(device)
+
+    return model
 
 
 def create_saab_transformer(
@@ -100,17 +142,25 @@ def create_saab_transformer(
 ) -> SAABTransformer:
     """Create SAABTransformer from preprocessor and config.
 
+    The model is automatically moved to the device specified in config.device
+    (using get_device utility). Ensure batches are on the same device.
+
     Args:
         preprocessor: Fitted Preprocessor instance
-        config: ModelConfig instance
+        config: ModelConfig instance with device specified
         lambda_bias: Optional override for lambda_bias (uses config.lambda_bias if None)
 
     Returns:
-        SAABTransformer instance
+        SAABTransformer instance on the device specified in config.device
+
+    Example:
+        >>> config = ModelConfig(device="mps")
+        >>> model = create_saab_transformer(preprocessor, config)
+        >>> # Model is now on MPS device
     """
     vocab_sizes = get_vocab_sizes(preprocessor)
 
-    return SAABTransformer(
+    model = SAABTransformer(
         d_model=config.d_model,
         num_layers=config.num_layers,
         num_heads=config.num_heads,
@@ -124,3 +174,9 @@ def create_saab_transformer(
         learnable_lambda=config.learnable_lambda,
         bias_normalization=config.bias_normalization,
     )
+
+    # Automatically move model to device specified in config
+    device = get_device(config.device)
+    model = model.to(device)
+
+    return model
