@@ -198,9 +198,22 @@ preprocessor.fit(str(train_path))
 print(f"Saving preprocessing artifacts for '{dataset_name}'...")
 preprocessor.save_artifacts(dataset_name)
 
+# Load task config early if provided (needed for dataset creation)
+task_type = None
+task_config = None
+if task_config_path:
+    import yaml
+
+    print(f"\nLoading task configuration from {task_config_path}...")
+    with open(task_config_path, "r") as f:
+        task_config = yaml.safe_load(f)
+
+    # Extract task type for dataset creation
+    task_type = task_config["task"]["name"]
+    print(f"✓ Task type: {task_type}")
+
 # Create datasets
 print("Creating datasets...")
-task_type = task_config["task"]["name"] if task_config_path else None
 train_dataset = StructuredDataset(str(train_path), preprocessor, split="train", task_type=task_type)
 val_dataset = StructuredDataset(str(val_path), preprocessor, split="val", task_type=task_type)
 
@@ -244,15 +257,9 @@ print(f"  - num_heads: {model.num_heads}")
 
 task_head = None
 loss_fn = None
-task_type = None
 
 if task_config_path:
-    import yaml
-
-    print(f"\nLoading task configuration from {task_config_path}...")
-    with open(task_config_path, "r") as f:
-        task_config = yaml.safe_load(f)
-
+    # task_config and task_type already loaded above
     # Validate config
     from saab_v3.tasks import validate_task_config, create_task_head_from_config
 
