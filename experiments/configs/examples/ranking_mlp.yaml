@@ -1,0 +1,11 @@
+# Example: Ranking with MLP Method
+# This config creates a pairwise ranking head using MLP comparison
+# Note: MLP method requires hidden_dims parameter
+
+task:
+  name: ranking
+  params:
+    method: "mlp"
+    hidden_dims: [256, 128]
+    dropout: 0.1
+

@@ -1,0 +1,24 @@
+# Template for Ranking Task
+# Copy this file and modify as needed for your experiment
+
+task:
+  name: ranking  # Task type: "classification", "ranking", "regression", "token_classification"
+  
+  params:
+    # Required parameters
+    method: "dot_product"  # Ranking comparison method
+                           # Options: "dot_product", "cosine", "mlp", "difference"
+                           # - "dot_product": Simple dot product of representations
+                           # - "cosine": Cosine similarity
+                           # - "mlp": MLP on concatenated representations (requires hidden_dims)
+                           # - "difference": MLP on difference vector (requires hidden_dims)
+    
+    # Optional parameters
+    hidden_dims: null  # Hidden dimensions for MLP (required for "mlp" and "difference" methods)
+                       # Example: [256, 128] for MLP with two hidden layers
+                       # Default: null (only valid for "dot_product" and "cosine")
+    
+    dropout: 0.1  # Dropout probability (must be in [0, 1))
+                  # Only used if hidden_dims is not null
+                  # Default: 0.1
+

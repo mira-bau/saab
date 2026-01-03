@@ -1,0 +1,11 @@
+# Example: Classification with MLP Head
+# This config creates a classification head with MLP (multi-layer perceptron)
+
+task:
+  name: classification
+  params:
+    num_classes: 10
+    multi_label: false
+    hidden_dims: [256, 128]
+    dropout: 0.1
+

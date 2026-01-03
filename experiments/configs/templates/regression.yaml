@@ -1,0 +1,23 @@
+# Template for Regression Task
+# Copy this file and modify as needed for your experiment
+
+task:
+  name: regression  # Task type: "classification", "ranking", "regression", "token_classification"
+  
+  params:
+    # Optional parameters
+    num_targets: 1  # Number of target values (must be > 0)
+                    # Default: 1 (single-target regression)
+    
+    hidden_dims: null  # Hidden dimensions for MLP (null = simple linear layer)
+                       # Example: [256, 128] for MLP with two hidden layers
+                       # Default: null (simple linear)
+    
+    dropout: 0.1  # Dropout probability (must be in [0, 1))
+                  # Only used if hidden_dims is not null
+                  # Default: 0.1
+    
+    # Pooling strategy (optional, defaults to CLS pooling)
+    # Options: "cls", "mean", "max"
+    pooling: "cls"  # Default: "cls"
+
