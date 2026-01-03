@@ -56,7 +56,12 @@ Task Configuration:
 import argparse
 from pathlib import Path
 
-from saab_v3.models import ModelConfig, create_flat_transformer, create_scratch_transformer, create_saab_transformer
+from saab_v3.models import (
+    ModelConfig,
+    create_flat_transformer,
+    create_scratch_transformer,
+    create_saab_transformer,
+)
 from saab_v3.training import (
     PreprocessingConfig,
     Preprocessor,
@@ -70,7 +75,9 @@ from saab_v3.training.trainer import Trainer
 # Command-Line Arguments
 # ============================================================================
 
-parser = argparse.ArgumentParser(description="Train Transformer models on structured data")
+parser = argparse.ArgumentParser(
+    description="Train Transformer models on structured data"
+)
 parser.add_argument(
     "--dataset-name",
     "--dataset",
@@ -214,8 +221,12 @@ if task_config_path:
 
 # Create datasets
 print("Creating datasets...")
-train_dataset = StructuredDataset(str(train_path), preprocessor, split="train", task_type=task_type)
-val_dataset = StructuredDataset(str(val_path), preprocessor, split="val", task_type=task_type)
+train_dataset = StructuredDataset(
+    str(train_path), preprocessor, split="train", task_type=task_type
+)
+val_dataset = StructuredDataset(
+    str(val_path), preprocessor, split="val", task_type=task_type
+)
 
 # Create dataloaders
 print("Creating dataloaders...")
@@ -267,9 +278,7 @@ if task_config_path:
     print("✓ Task configuration validated")
 
     # Create task head
-    task_head = create_task_head_from_config(
-        task_config, d_model=model_config.d_model
-    )
+    task_head = create_task_head_from_config(task_config, d_model=model_config.d_model)
     print(f"✓ Task head created: {task_head.__class__.__name__}")
 
     # Extract task type and create loss function
