@@ -172,7 +172,18 @@ class Batch(BaseModel):
     # - Classification (multi-label): [batch, num_classes] (binary vectors)
     # - Regression: [batch, num_targets] (continuous values)
     # - Token Classification: [batch, seq_len] (label indices per token)
-    # - Ranking: Not stored in Batch (handled separately with pairs)
+    # - Ranking: [batch] (1 = seq_a better, -1 = seq_b better, or binary 0/1)
+    
+    # Ranking-specific fields (optional, None for non-ranking tasks)
+    token_ids_b: torch.Tensor | None = None  # [batch_size, seq_len]
+    attention_mask_b: torch.Tensor | None = None  # [batch_size, seq_len]
+    field_ids_b: torch.Tensor | None = None  # [batch_size, seq_len]
+    entity_ids_b: torch.Tensor | None = None  # [batch_size, seq_len]
+    time_ids_b: torch.Tensor | None = None  # [batch_size, seq_len]
+    edge_ids_b: torch.Tensor | None = None  # [batch_size, seq_len] or None
+    role_ids_b: torch.Tensor | None = None  # [batch_size, seq_len] or None
+    token_type_ids_b: torch.Tensor | None = None  # [batch_size, seq_len]
+    sequence_lengths_b: list[int] | None = None  # Actual lengths for batch B
 
     @field_validator("attention_mask")
     @classmethod
@@ -248,6 +259,55 @@ class Batch(BaseModel):
                     f"labels batch dimension ({self.labels.shape[0]}) must match batch_size ({batch_size})"
                 )
 
+        # Validate ranking batch fields if present
+        if self.token_ids_b is not None:
+            # All _b fields must be present together
+            required_b_fields = [
+                "attention_mask_b",
+                "field_ids_b",
+                "entity_ids_b",
+                "time_ids_b",
+                "token_type_ids_b",
+            ]
+            for field_name in required_b_fields:
+                field_value = getattr(self, field_name)
+                if field_value is None:
+                    raise ValueError(
+                        f"Ranking batch requires all _b fields. Missing: {field_name}"
+                    )
+                if field_value.shape != (batch_size, seq_len):
+                    raise ValueError(
+                        f"{field_name} must have shape [batch_size, seq_len] = [{batch_size}, {seq_len}], "
+                        f"got {field_value.shape}"
+                    )
+
+            # Validate optional _b fields if provided
+            if self.edge_ids_b is not None and self.edge_ids_b.shape != (batch_size, seq_len):
+                raise ValueError(
+                    f"edge_ids_b must have shape [batch_size, seq_len] = [{batch_size}, {seq_len}], "
+                    f"got {self.edge_ids_b.shape}"
+                )
+            if self.role_ids_b is not None and self.role_ids_b.shape != (batch_size, seq_len):
+                raise ValueError(
+                    f"role_ids_b must have shape [batch_size, seq_len] = [{batch_size}, {seq_len}], "
+                    f"got {self.role_ids_b.shape}"
+                )
+
+            # Validate sequence_lengths_b
+            if self.sequence_lengths_b is None:
+                raise ValueError("sequence_lengths_b is required when token_ids_b is present")
+            if len(self.sequence_lengths_b) != batch_size:
+                raise ValueError(
+                    f"sequence_lengths_b length ({len(self.sequence_lengths_b)}) must match batch_size ({batch_size})"
+                )
+            for i, length in enumerate(self.sequence_lengths_b):
+                if length < 0:
+                    raise ValueError(f"sequence_lengths_b[{i}] must be >= 0, got {length}")
+                if length > seq_len:
+                    raise ValueError(
+                        f"sequence_lengths_b[{i}] ({length}) must be <= seq_len ({seq_len})"
+                    )
+
         return self
 
     @property
@@ -274,4 +334,14 @@ class Batch(BaseModel):
             sequence_lengths=self.sequence_lengths,
             sequence_ids=self.sequence_ids,
             labels=self.labels.to(device) if self.labels is not None else None,
+            # Ranking fields
+            token_ids_b=self.token_ids_b.to(device) if self.token_ids_b is not None else None,
+            attention_mask_b=self.attention_mask_b.to(device) if self.attention_mask_b is not None else None,
+            field_ids_b=self.field_ids_b.to(device) if self.field_ids_b is not None else None,
+            entity_ids_b=self.entity_ids_b.to(device) if self.entity_ids_b is not None else None,
+            time_ids_b=self.time_ids_b.to(device) if self.time_ids_b is not None else None,
+            edge_ids_b=self.edge_ids_b.to(device) if self.edge_ids_b is not None else None,
+            role_ids_b=self.role_ids_b.to(device) if self.role_ids_b is not None else None,
+            token_type_ids_b=self.token_type_ids_b.to(device) if self.token_type_ids_b is not None else None,
+            sequence_lengths_b=self.sequence_lengths_b,
         )

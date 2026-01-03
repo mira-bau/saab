@@ -80,3 +80,59 @@
 {"step_or_epoch": 1, "is_epoch": false, "phase": "train", "metrics": {"train/test_metric": 0.75}}
 {"step_or_epoch": 1, "is_epoch": true, "phase": "val", "metrics": {"val/loss": 0.3, "val/accuracy": 0.95}}
 {"step_or_epoch": 0, "is_epoch": true, "phase": "val", "metrics": {"val/loss": 0.013517528772354126}}
+{"step_or_epoch": 1, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.5, "train/accuracy": 0.9}}
+{"step_or_epoch": 0, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.5}}
+{"step_or_epoch": 1, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.51}}
+{"step_or_epoch": 2, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.52}}
+{"step_or_epoch": 3, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.53}}
+{"step_or_epoch": 4, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.54}}
+{"step_or_epoch": 5, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.55}}
+{"step_or_epoch": 6, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.56}}
+{"step_or_epoch": 7, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.5700000000000001}}
+{"step_or_epoch": 8, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.58}}
+{"step_or_epoch": 9, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.59}}
+{"step_or_epoch": 1, "is_epoch": false, "phase": "train", "metrics": {"train/test_metric": 0.75}}
+{"step_or_epoch": 1, "is_epoch": true, "phase": "val", "metrics": {"val/loss": 0.3, "val/accuracy": 0.95}}
+{"step_or_epoch": 0, "is_epoch": true, "phase": "val", "metrics": {"val/loss": 0.013517528772354126}}
+{"step_or_epoch": 1, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.5, "train/accuracy": 0.9}}
+{"step_or_epoch": 0, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.5}}
+{"step_or_epoch": 1, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.51}}
+{"step_or_epoch": 2, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.52}}
+{"step_or_epoch": 3, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.53}}
+{"step_or_epoch": 4, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.54}}
+{"step_or_epoch": 5, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.55}}
+{"step_or_epoch": 6, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.56}}
+{"step_or_epoch": 7, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.5700000000000001}}
+{"step_or_epoch": 8, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.58}}
+{"step_or_epoch": 9, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.59}}
+{"step_or_epoch": 1, "is_epoch": false, "phase": "train", "metrics": {"train/test_metric": 0.75}}
+{"step_or_epoch": 1, "is_epoch": true, "phase": "val", "metrics": {"val/loss": 0.3, "val/accuracy": 0.95}}
+{"step_or_epoch": 0, "is_epoch": true, "phase": "val", "metrics": {"val/loss": 0.013517528772354126}}
+{"step_or_epoch": 1, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.5, "train/accuracy": 0.9}}
+{"step_or_epoch": 0, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.5}}
+{"step_or_epoch": 1, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.51}}
+{"step_or_epoch": 2, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.52}}
+{"step_or_epoch": 3, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.53}}
+{"step_or_epoch": 4, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.54}}
+{"step_or_epoch": 5, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.55}}
+{"step_or_epoch": 6, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.56}}
+{"step_or_epoch": 7, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.5700000000000001}}
+{"step_or_epoch": 8, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.58}}
+{"step_or_epoch": 9, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.59}}
+{"step_or_epoch": 1, "is_epoch": false, "phase": "train", "metrics": {"train/test_metric": 0.75}}
+{"step_or_epoch": 1, "is_epoch": true, "phase": "val", "metrics": {"val/loss": 0.3, "val/accuracy": 0.95}}
+{"step_or_epoch": 0, "is_epoch": true, "phase": "val", "metrics": {"val/loss": 0.013517528772354126}}
+{"step_or_epoch": 1, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.5, "train/accuracy": 0.9}}
+{"step_or_epoch": 0, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.5}}
+{"step_or_epoch": 1, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.51}}
+{"step_or_epoch": 2, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.52}}
+{"step_or_epoch": 3, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.53}}
+{"step_or_epoch": 4, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.54}}
+{"step_or_epoch": 5, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.55}}
+{"step_or_epoch": 6, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.56}}
+{"step_or_epoch": 7, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.5700000000000001}}
+{"step_or_epoch": 8, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.58}}
+{"step_or_epoch": 9, "is_epoch": false, "phase": "train", "metrics": {"train/loss": 0.59}}
+{"step_or_epoch": 1, "is_epoch": false, "phase": "train", "metrics": {"train/test_metric": 0.75}}
+{"step_or_epoch": 1, "is_epoch": true, "phase": "val", "metrics": {"val/loss": 0.3, "val/accuracy": 0.95}}
+{"step_or_epoch": 0, "is_epoch": true, "phase": "val", "metrics": {"val/loss": 0.013517528772354126}}

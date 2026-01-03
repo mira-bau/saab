@@ -29,13 +29,25 @@ class Batcher:
 
     def batch(
         self,
-        sequences: list[tuple[TokenizedSequence, list[int], list[EncodedTag], Any | None]],
+        sequences: list[
+            tuple[TokenizedSequence, list[int], list[EncodedTag], Any | None]
+            | tuple[
+                tuple[TokenizedSequence, list[int], list[EncodedTag]],
+                tuple[TokenizedSequence, list[int], list[EncodedTag]],
+                Any | None,
+            ]
+        ],
+        task_type: str | None = None,
     ) -> Batch:
         """Create batch from encoded sequences.
 
         Args:
-            sequences: List of (TokenizedSequence, token_ids, encoded_tags, label) tuples
-                label can be None if not present
+            sequences: List of sequence tuples. For single-sequence tasks:
+                (TokenizedSequence, token_ids, encoded_tags, label) tuples.
+                For ranking tasks:
+                ((seq_a_data), (seq_b_data), label) tuples where each data is
+                (TokenizedSequence, token_ids, encoded_tags).
+            task_type: Task type ("ranking" for ranking pairs, None for single sequences)
 
         Returns:
             Batch object with all tensors and labels (if provided)
@@ -46,6 +58,24 @@ class Batcher:
         if not sequences:
             raise ValueError("Cannot create batch from empty sequences list")
 
+        if task_type == "ranking":
+            return self._batch_ranking_pairs(sequences)
+        else:
+            return self._batch_single_sequences(sequences)
+
+    def _batch_single_sequences(
+        self,
+        sequences: list[tuple[TokenizedSequence, list[int], list[EncodedTag], Any | None]],
+    ) -> Batch:
+        """Create batch from single sequences (existing logic).
+
+        Args:
+            sequences: List of (TokenizedSequence, token_ids, encoded_tags, label) tuples
+                label can be None if not present
+
+        Returns:
+            Batch object with all tensors and labels (if provided)
+        """
         # 1. Extract labels (if present)
         labels = [label for _, _, _, label in sequences]
         has_labels = any(label is not None for label in labels)
@@ -111,6 +141,78 @@ class Batcher:
             sequence_lengths=sequence_lengths,
             sequence_ids=sequence_ids if any(sequence_ids) else None,
             labels=labels_tensor,
+        )
+
+    def _batch_ranking_pairs(
+        self,
+        sequences: list[
+            tuple[
+                tuple[TokenizedSequence, list[int], list[EncodedTag]],
+                tuple[TokenizedSequence, list[int], list[EncodedTag]],
+                Any | None,
+            ]
+        ],
+    ) -> Batch:
+        """Create batch from ranking pairs.
+
+        Args:
+            sequences: List of ((seq_a_data), (seq_b_data), label) tuples
+                where each data is (TokenizedSequence, token_ids, encoded_tags)
+
+        Returns:
+            Batch object with all tensors including _b fields for batch B
+        """
+        # Extract pairs
+        seqs_a = [seq_a_data for seq_a_data, _, _ in sequences]
+        seqs_b = [seq_b_data for _, seq_b_data, _ in sequences]
+        labels = [label for _, _, label in sequences]
+
+        # Batch sequence A (using single sequence batching)
+        batch_a = self._batch_single_sequences(
+            [(seq, token_ids, encoded_tags, None) for seq, token_ids, encoded_tags in seqs_a]
+        )
+
+        # Batch sequence B (using single sequence batching)
+        batch_b = self._batch_single_sequences(
+            [(seq, token_ids, encoded_tags, None) for seq, token_ids, encoded_tags in seqs_b]
+        )
+
+        # Batch labels (ranking labels are simple: [batch])
+        labels_tensor = None
+        if any(label is not None for label in labels):
+            # Convert labels to tensor (1 = a better, -1 = b better, or binary 0/1)
+            label_values = []
+            for label in labels:
+                if label is None:
+                    label_values.append(0)  # Default to 0 if missing
+                else:
+                    label_values.append(int(label))
+            labels_tensor = torch.tensor(label_values, dtype=torch.long, device=self.device)
+
+        # Combine into ranking batch
+        return Batch(
+            # Batch A fields
+            token_ids=batch_a.token_ids,
+            attention_mask=batch_a.attention_mask,
+            field_ids=batch_a.field_ids,
+            entity_ids=batch_a.entity_ids,
+            time_ids=batch_a.time_ids,
+            edge_ids=batch_a.edge_ids,
+            role_ids=batch_a.role_ids,
+            token_type_ids=batch_a.token_type_ids,
+            sequence_lengths=batch_a.sequence_lengths,
+            sequence_ids=batch_a.sequence_ids,
+            labels=labels_tensor,
+            # Batch B fields
+            token_ids_b=batch_b.token_ids,
+            attention_mask_b=batch_b.attention_mask,
+            field_ids_b=batch_b.field_ids,
+            entity_ids_b=batch_b.entity_ids,
+            time_ids_b=batch_b.time_ids,
+            edge_ids_b=batch_b.edge_ids,
+            role_ids_b=batch_b.role_ids,
+            token_type_ids_b=batch_b.token_type_ids,
+            sequence_lengths_b=batch_b.sequence_lengths,
         )
 
     def _truncate_sequence(

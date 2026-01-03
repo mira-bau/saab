@@ -42,13 +42,17 @@ def create_dataloader(
     # Create Batcher with device
     batcher = Batcher(max_seq_len=max_seq_len, pad_token_id=PAD_IDX, device=device)
 
+    # Get task_type from dataset if available
+    task_type = getattr(dataset, "task_type", None)
+
     # Create collate function
     def collate_fn(batch_items):
         """Collate function that collects items and creates Batch."""
         # batch_items is a list of (TokenizedSequence, token_ids, encoded_tags, label) tuples
+        # or for ranking: ((seq_a_data), (seq_b_data), label) tuples
         # label can be None if not present in data
         # Pass directly to batcher (device is already set in batcher)
-        return batcher.batch(batch_items)
+        return batcher.batch(batch_items, task_type=task_type)
 
     # Create DataLoader
     return DataLoader(

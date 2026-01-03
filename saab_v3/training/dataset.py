@@ -21,6 +21,7 @@ class StructuredDataset(Dataset):
         data: Any | list[Any] | str | Path,
         preprocessor: Preprocessor,
         split: str = "train",
+        task_type: str | None = None,
         lazy: bool = False,
     ):
         """Initialize dataset.
@@ -29,20 +30,27 @@ class StructuredDataset(Dataset):
             data: Input data (file path, DataFrame, dict, Graph, or list of these)
             preprocessor: Fitted Preprocessor instance
             split: Dataset split name ("train", "val", "test")
+            task_type: Task type ("ranking" for ranking pairs, None for single sequences)
             lazy: If True, load data on-demand (not implemented in Phase 1)
         """
         self.preprocessor = preprocessor
         self.split = split
+        self.task_type = task_type
         self.lazy = lazy
 
         # Load data
         self.raw_data = self._load_data(data)
 
-        # Transform: extract and tokenize
-        sequences = self.preprocessor.transform(self.raw_data)
+        # For ranking tasks, we handle pairs differently
+        if task_type == "ranking":
+            # Store raw data for ranking pairs (will encode on-demand in __getitem__)
+            self.encoded_sequences = None
+        else:
+            # Transform: extract and tokenize
+            sequences = self.preprocessor.transform(self.raw_data)
 
-        # Encode: convert to token IDs and encoded tags
-        self.encoded_sequences = self.preprocessor.encode(sequences)
+            # Encode: convert to token IDs and encoded tags
+            self.encoded_sequences = self.preprocessor.encode(sequences)
 
     def _load_data(self, data: Any | list[Any] | str | Path) -> Any:
         """Load data from various sources.
@@ -134,23 +142,167 @@ class StructuredDataset(Dataset):
 
     def __len__(self) -> int:
         """Return number of sequences."""
+        if self.task_type == "ranking":
+            # For ranking, count pairs from raw data
+            if isinstance(self.raw_data, pd.DataFrame):
+                return len(self.raw_data)
+            elif isinstance(self.raw_data, list):
+                return len(self.raw_data)
+            elif isinstance(self.raw_data, dict):
+                # Check for sequence_a or pairs list
+                if "sequence_a" in self.raw_data and "sequence_b" in self.raw_data:
+                    seq_a = self.raw_data["sequence_a"]
+                    return len(seq_a) if isinstance(seq_a, list) else 1
+                return 0
+            return 0
         return len(self.encoded_sequences)
 
     def __getitem__(
         self, idx: int
+    ) -> tuple[TokenizedSequence, list[int], list[EncodedTag], Any | None] | tuple[
+        tuple[TokenizedSequence, list[int], list[EncodedTag]],
+        tuple[TokenizedSequence, list[int], list[EncodedTag]],
+        Any | None,
+    ]:
+        """Return encoded sequence(s) ready for batching.
+
+        Args:
+            idx: Sequence index
+
+        Returns:
+            For single-sequence tasks: (TokenizedSequence, token_ids, encoded_tags, label) tuple
+            For ranking tasks: ((seq_a_data), (seq_b_data), label) tuple where each data is (TokenizedSequence, token_ids, encoded_tags)
+            label is None if not present in data
+        """
+        if self.task_type == "ranking":
+            return self._get_ranking_item(idx)
+        else:
+            return self._get_single_item(idx)
+
+    def _get_single_item(
+        self, idx: int
     ) -> tuple[TokenizedSequence, list[int], list[EncodedTag], Any | None]:
-        """Return encoded sequence ready for batching.
+        """Return single sequence (existing logic).
 
         Args:
             idx: Sequence index
 
         Returns:
             (TokenizedSequence, token_ids, encoded_tags, label) tuple
-            label is None if not present in data
         """
         tokenized_seq, token_ids, encoded_tags = self.encoded_sequences[idx]
         label = self._extract_label(idx)
         return tokenized_seq, token_ids, encoded_tags, label
+
+    def _get_ranking_item(
+        self, idx: int
+    ) -> tuple[
+        tuple[TokenizedSequence, list[int], list[EncodedTag]],
+        tuple[TokenizedSequence, list[int], list[EncodedTag]],
+        Any | None,
+    ]:
+        """Return ranking pair.
+
+        Args:
+            idx: Pair index
+
+        Returns:
+            ((seq_a_data), (seq_b_data), label) tuple where each data is (TokenizedSequence, token_ids, encoded_tags)
+        """
+        # Extract sequence_a and sequence_b from raw data
+        if isinstance(self.raw_data, pd.DataFrame):
+            # Check for sequence_a, sequence_b columns
+            if "sequence_a" not in self.raw_data.columns or "sequence_b" not in self.raw_data.columns:
+                raise ValueError(
+                    "Ranking task requires 'sequence_a' and 'sequence_b' columns in CSV"
+                )
+
+            seq_a_raw = self.raw_data.iloc[idx]["sequence_a"]
+            seq_b_raw = self.raw_data.iloc[idx]["sequence_b"]
+            label = self._extract_ranking_label(idx)
+
+        elif isinstance(self.raw_data, list):
+            # List of dicts with sequence_a, sequence_b
+            if idx >= len(self.raw_data):
+                raise IndexError(f"Index {idx} out of range for dataset of size {len(self.raw_data)}")
+            item = self.raw_data[idx]
+            if not isinstance(item, dict):
+                raise ValueError("Ranking task requires list of dicts with 'sequence_a' and 'sequence_b'")
+            if "sequence_a" not in item or "sequence_b" not in item:
+                raise ValueError("Ranking task requires 'sequence_a' and 'sequence_b' keys in dict")
+            seq_a_raw = item["sequence_a"]
+            seq_b_raw = item["sequence_b"]
+            label = item.get("label") or item.get("target") or item.get("y")
+
+        elif isinstance(self.raw_data, dict):
+            # Dict with sequence_a and sequence_b lists
+            if "sequence_a" not in self.raw_data or "sequence_b" not in self.raw_data:
+                raise ValueError("Ranking task requires 'sequence_a' and 'sequence_b' keys in dict")
+            seq_a_list = self.raw_data["sequence_a"]
+            seq_b_list = self.raw_data["sequence_b"]
+            if idx >= len(seq_a_list) or idx >= len(seq_b_list):
+                raise IndexError(f"Index {idx} out of range")
+            seq_a_raw = seq_a_list[idx]
+            seq_b_raw = seq_b_list[idx]
+            labels = self.raw_data.get("labels") or self.raw_data.get("targets")
+            label = labels[idx] if labels and idx < len(labels) else None
+
+        else:
+            raise ValueError(f"Unsupported raw_data type for ranking: {type(self.raw_data)}")
+
+        # Transform and encode both sequences separately
+        # Handle dict/DataFrame: convert dict to DataFrame to ensure single sequence
+        if isinstance(seq_a_raw, dict):
+            # Convert dict to DataFrame with one row so TableExtractor produces one sequence
+            seq_a_input = pd.DataFrame([seq_a_raw])
+        elif isinstance(seq_a_raw, pd.DataFrame):
+            # DataFrame should produce one sequence per row
+            seq_a_input = seq_a_raw
+        else:
+            seq_a_input = seq_a_raw
+
+        if isinstance(seq_b_raw, dict):
+            # Convert dict to DataFrame with one row so TableExtractor produces one sequence
+            seq_b_input = pd.DataFrame([seq_b_raw])
+        elif isinstance(seq_b_raw, pd.DataFrame):
+            seq_b_input = seq_b_raw
+        else:
+            seq_b_input = seq_b_raw
+
+        # Transform sequence_a
+        sequences_a = self.preprocessor.transform(seq_a_input)
+        if len(sequences_a) != 1:
+            raise ValueError(f"Expected single sequence for sequence_a at index {idx}, got {len(sequences_a)}")
+        encoded_a = self.preprocessor.encode(sequences_a)
+        seq_a_data = encoded_a[0]  # (TokenizedSequence, token_ids, encoded_tags)
+
+        # Transform sequence_b
+        sequences_b = self.preprocessor.transform(seq_b_input)
+        if len(sequences_b) != 1:
+            raise ValueError(f"Expected single sequence for sequence_b at index {idx}, got {len(sequences_b)}")
+        encoded_b = self.preprocessor.encode(sequences_b)
+        seq_b_data = encoded_b[0]  # (TokenizedSequence, token_ids, encoded_tags)
+
+        return (seq_a_data, seq_b_data, label)
+
+    def _extract_ranking_label(self, idx: int) -> Any | None:
+        """Extract ranking label from raw data.
+
+        Args:
+            idx: Pair index
+
+        Returns:
+            Label value (int: 1 = a better, -1 = b better, or binary 0/1) or None
+        """
+        if isinstance(self.raw_data, pd.DataFrame):
+            # Try common column names
+            for col_name in ["label", "target", "y"]:
+                if col_name in self.raw_data.columns:
+                    label_value = self.raw_data.iloc[idx][col_name]
+                    if pd.isna(label_value):
+                        return None
+                    return label_value
+        return None
 
     def _extract_label(self, idx: int) -> Any | None:
         """Extract label from raw data for given index.

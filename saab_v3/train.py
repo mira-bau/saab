@@ -200,8 +200,9 @@ preprocessor.save_artifacts(dataset_name)
 
 # Create datasets
 print("Creating datasets...")
-train_dataset = StructuredDataset(str(train_path), preprocessor, split="train")
-val_dataset = StructuredDataset(str(val_path), preprocessor, split="val")
+task_type = task_config["task"]["name"] if task_config_path else None
+train_dataset = StructuredDataset(str(train_path), preprocessor, split="train", task_type=task_type)
+val_dataset = StructuredDataset(str(val_path), preprocessor, split="val", task_type=task_type)
 
 # Create dataloaders
 print("Creating dataloaders...")

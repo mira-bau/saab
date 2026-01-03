@@ -483,3 +483,96 @@ def spec_batch_to_device_without_labels(sample_batch_tensors):
 
     # Assert
     assert moved_batch.labels is None
+
+
+# ============================================================================
+# Batch Ranking Specs
+# ============================================================================
+
+
+def spec_batch_creation_with_ranking_pairs(sample_batch_tensors):
+    """Verify Batch can be created with ranking pairs (_b fields)."""
+    # Arrange
+    batch_size, seq_len = 2, 5
+    sample_batch_tensors["token_ids_b"] = torch.ones(batch_size, seq_len, dtype=torch.long)
+    sample_batch_tensors["attention_mask_b"] = torch.ones(batch_size, seq_len, dtype=torch.long)
+    sample_batch_tensors["field_ids_b"] = torch.zeros(batch_size, seq_len, dtype=torch.long)
+    sample_batch_tensors["entity_ids_b"] = torch.zeros(batch_size, seq_len, dtype=torch.long)
+    sample_batch_tensors["time_ids_b"] = torch.zeros(batch_size, seq_len, dtype=torch.long)
+    sample_batch_tensors["token_type_ids_b"] = torch.zeros(batch_size, seq_len, dtype=torch.long)
+    sample_batch_tensors["sequence_lengths_b"] = [5, 5]
+
+    # Act
+    batch = Batch(**sample_batch_tensors)
+
+    # Assert
+    assert batch.token_ids_b is not None
+    assert batch.attention_mask_b is not None
+    assert batch.field_ids_b is not None
+    assert batch.entity_ids_b is not None
+    assert batch.time_ids_b is not None
+    assert batch.token_type_ids_b is not None
+    assert batch.sequence_lengths_b is not None
+    assert batch.token_ids_b.shape == (batch_size, seq_len)
+
+
+def spec_batch_ranking_validation_all_b_fields_required(sample_batch_tensors):
+    """Verify Batch validation fails if token_ids_b exists but other _b fields are missing."""
+    # Arrange
+    batch_size, seq_len = 2, 5
+    sample_batch_tensors["token_ids_b"] = torch.ones(batch_size, seq_len, dtype=torch.long)
+    # Missing attention_mask_b and other required fields
+
+    # Act & Assert
+    import pytest
+
+    with pytest.raises(ValueError, match="Ranking batch requires all _b fields"):
+        Batch(**sample_batch_tensors)
+
+
+def spec_batch_ranking_validation_shape_matching(sample_batch_tensors):
+    """Verify Batch validation ensures _b fields match _a field shapes."""
+    # Arrange
+    batch_size, seq_len = 2, 5
+    sample_batch_tensors["token_ids_b"] = torch.ones(batch_size, seq_len, dtype=torch.long)
+    sample_batch_tensors["attention_mask_b"] = torch.ones(batch_size, seq_len, dtype=torch.long)
+    sample_batch_tensors["field_ids_b"] = torch.zeros(batch_size, seq_len, dtype=torch.long)
+    sample_batch_tensors["entity_ids_b"] = torch.zeros(batch_size, seq_len, dtype=torch.long)
+    sample_batch_tensors["time_ids_b"] = torch.zeros(batch_size, seq_len, dtype=torch.long)
+    sample_batch_tensors["token_type_ids_b"] = torch.zeros(batch_size, seq_len, dtype=torch.long)
+    sample_batch_tensors["sequence_lengths_b"] = [5, 5]
+    # Wrong shape for field_ids_b
+    sample_batch_tensors["field_ids_b"] = torch.zeros(3, seq_len, dtype=torch.long)  # Wrong batch size
+
+    # Act & Assert
+    import pytest
+
+    with pytest.raises(ValueError, match="field_ids_b must have shape"):
+        Batch(**sample_batch_tensors)
+
+
+def spec_batch_to_device_with_ranking_pairs(sample_batch_tensors):
+    """Verify to(device) moves all _b tensors to device correctly."""
+    # Arrange
+    batch_size, seq_len = 2, 5
+    sample_batch_tensors["token_ids_b"] = torch.ones(batch_size, seq_len, dtype=torch.long)
+    sample_batch_tensors["attention_mask_b"] = torch.ones(batch_size, seq_len, dtype=torch.long)
+    sample_batch_tensors["field_ids_b"] = torch.zeros(batch_size, seq_len, dtype=torch.long)
+    sample_batch_tensors["entity_ids_b"] = torch.zeros(batch_size, seq_len, dtype=torch.long)
+    sample_batch_tensors["time_ids_b"] = torch.zeros(batch_size, seq_len, dtype=torch.long)
+    sample_batch_tensors["token_type_ids_b"] = torch.zeros(batch_size, seq_len, dtype=torch.long)
+    sample_batch_tensors["sequence_lengths_b"] = [5, 5]
+    batch = Batch(**sample_batch_tensors)
+    device = torch.device("cpu")
+
+    # Act
+    moved_batch = batch.to(device)
+
+    # Assert
+    assert moved_batch.token_ids_b is not None
+    assert moved_batch.token_ids_b.device == device
+    assert moved_batch.attention_mask_b.device == device
+    assert moved_batch.field_ids_b.device == device
+    assert moved_batch.entity_ids_b.device == device
+    assert moved_batch.time_ids_b.device == device
+    assert moved_batch.token_type_ids_b.device == device

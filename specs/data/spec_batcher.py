@@ -414,3 +414,99 @@ def spec_batcher_labels_device(sample_encoded_sequences):
     # Assert
     assert batch.labels is not None
     assert batch.labels.device == cpu_device
+
+
+# ============================================================================
+# Batcher Ranking Specs
+# ============================================================================
+
+
+def spec_batcher_batch_ranking_pairs(sample_encoded_sequences):
+    """Verify Batcher batches ranking pairs into Batch with _b fields."""
+    # Arrange
+    batcher = Batcher(max_seq_len=512, device=torch.device("cpu"))
+    # Create ranking pairs: ((seq_a_data), (seq_b_data), label)
+    ranking_sequences = [
+        (
+            (sample_encoded_sequences[0][0], sample_encoded_sequences[0][1], sample_encoded_sequences[0][2]),
+            (sample_encoded_sequences[1][0], sample_encoded_sequences[1][1], sample_encoded_sequences[1][2]),
+            1
+        ),
+        (
+            (sample_encoded_sequences[1][0], sample_encoded_sequences[1][1], sample_encoded_sequences[1][2]),
+            (sample_encoded_sequences[0][0], sample_encoded_sequences[0][1], sample_encoded_sequences[0][2]),
+            -1
+        ),
+    ]
+
+    # Act
+    batch = batcher.batch(ranking_sequences, task_type="ranking")
+
+    # Assert
+    # Verify batch A fields exist
+    assert batch.token_ids is not None
+    assert batch.attention_mask is not None
+    # Verify batch B fields exist
+    assert batch.token_ids_b is not None
+    assert batch.attention_mask_b is not None
+    assert batch.field_ids_b is not None
+    assert batch.entity_ids_b is not None
+    assert batch.time_ids_b is not None
+    assert batch.token_type_ids_b is not None
+    assert batch.sequence_lengths_b is not None
+    # Verify labels
+    assert batch.labels is not None
+    assert batch.labels.shape == (2,)
+    assert torch.equal(batch.labels, torch.tensor([1, -1], dtype=torch.long))
+
+
+def spec_batcher_ranking_pairs_shapes_match(sample_encoded_sequences):
+    """Verify batch_a and batch_b have matching batch_size for ranking."""
+    # Arrange
+    batcher = Batcher(max_seq_len=512, device=torch.device("cpu"))
+    ranking_sequences = [
+        (
+            (sample_encoded_sequences[0][0], sample_encoded_sequences[0][1], sample_encoded_sequences[0][2]),
+            (sample_encoded_sequences[1][0], sample_encoded_sequences[1][1], sample_encoded_sequences[1][2]),
+            1
+        ),
+    ]
+
+    # Act
+    batch = batcher.batch(ranking_sequences, task_type="ranking")
+
+    # Assert
+    batch_size = batch.batch_size
+    assert batch.token_ids.shape[0] == batch_size
+    assert batch.token_ids_b.shape[0] == batch_size
+    assert batch.attention_mask.shape[0] == batch_size
+    assert batch.attention_mask_b.shape[0] == batch_size
+    assert len(batch.sequence_lengths) == batch_size
+    assert len(batch.sequence_lengths_b) == batch_size
+
+
+def spec_batcher_ranking_labels(sample_encoded_sequences):
+    """Verify labels are batched correctly for ranking."""
+    # Arrange
+    batcher = Batcher(max_seq_len=512, device=torch.device("cpu"))
+    ranking_sequences = [
+        (
+            (sample_encoded_sequences[0][0], sample_encoded_sequences[0][1], sample_encoded_sequences[0][2]),
+            (sample_encoded_sequences[1][0], sample_encoded_sequences[1][1], sample_encoded_sequences[1][2]),
+            1
+        ),
+        (
+            (sample_encoded_sequences[1][0], sample_encoded_sequences[1][1], sample_encoded_sequences[1][2]),
+            (sample_encoded_sequences[0][0], sample_encoded_sequences[0][1], sample_encoded_sequences[0][2]),
+            0  # Binary label
+        ),
+    ]
+
+    # Act
+    batch = batcher.batch(ranking_sequences, task_type="ranking")
+
+    # Assert
+    assert batch.labels is not None
+    assert batch.labels.shape == (2,)
+    assert batch.labels.dtype == torch.long
+    assert torch.equal(batch.labels, torch.tensor([1, 0], dtype=torch.long))

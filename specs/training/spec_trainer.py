@@ -468,3 +468,113 @@ def spec_trainer_loss_computation_auto_create_loss(fitted_preprocessor, sample_t
     assert loss is not None
     assert not torch.isnan(loss)
 
+
+# ============================================================================
+# Ranking Trainer Specs
+# ============================================================================
+
+
+def spec_trainer_forward_ranking(fitted_preprocessor, sample_training_config, sample_model_config):
+    """Verify Trainer._forward_ranking() encodes both sequences and returns scores."""
+    # Arrange
+    from saab_v3.tasks import PairwiseRankingHead
+    from saab_v3.models import create_flat_transformer
+    from saab_v3.data.structures import Batch
+
+    model = create_flat_transformer(fitted_preprocessor, sample_model_config)
+    task_head = PairwiseRankingHead(d_model=128, method="dot_product")
+
+    # Create ranking batch (with _b fields)
+    batch_size, seq_len = 2, 5
+    device = torch.device("cpu")
+    ranking_batch = Batch(
+        token_ids=torch.ones(batch_size, seq_len, dtype=torch.long, device=device),
+        attention_mask=torch.ones(batch_size, seq_len, dtype=torch.long, device=device),
+        field_ids=torch.zeros(batch_size, seq_len, dtype=torch.long, device=device),
+        entity_ids=torch.zeros(batch_size, seq_len, dtype=torch.long, device=device),
+        time_ids=torch.zeros(batch_size, seq_len, dtype=torch.long, device=device),
+        token_type_ids=torch.zeros(batch_size, seq_len, dtype=torch.long, device=device),
+        sequence_lengths=[seq_len] * batch_size,
+        token_ids_b=torch.ones(batch_size, seq_len, dtype=torch.long, device=device),
+        attention_mask_b=torch.ones(batch_size, seq_len, dtype=torch.long, device=device),
+        field_ids_b=torch.zeros(batch_size, seq_len, dtype=torch.long, device=device),
+        entity_ids_b=torch.zeros(batch_size, seq_len, dtype=torch.long, device=device),
+        time_ids_b=torch.zeros(batch_size, seq_len, dtype=torch.long, device=device),
+        token_type_ids_b=torch.zeros(batch_size, seq_len, dtype=torch.long, device=device),
+        sequence_lengths_b=[seq_len] * batch_size,
+    )
+
+    trainer = Trainer(
+        model=model,
+        config=sample_training_config,
+        train_loader=None,  # Not needed for this test
+        task_head=task_head,
+        task_type="ranking",
+        experiment_name="test",
+    )
+
+    # Act
+    scores = trainer._forward_ranking(ranking_batch)
+
+    # Assert
+    assert scores is not None
+    assert isinstance(scores, torch.Tensor)
+    assert scores.shape == (batch_size,)
+    assert not torch.isnan(scores).any()
+    assert not torch.isinf(scores).any()
+
+
+def spec_trainer_loss_computation_ranking(fitted_preprocessor, sample_training_config, sample_model_config):
+    """Verify Trainer computes ranking loss correctly."""
+    # Arrange
+    from saab_v3.tasks import PairwiseRankingHead
+    from saab_v3.training.loss import create_loss_fn
+    from saab_v3.models import create_flat_transformer
+    from saab_v3.data.structures import Batch
+
+    model = create_flat_transformer(fitted_preprocessor, sample_model_config)
+    task_head = PairwiseRankingHead(d_model=128, method="dot_product")
+    loss_fn = create_loss_fn("ranking", method="hinge", margin=1.0)
+
+    # Create ranking batch
+    batch_size, seq_len = 2, 5
+    device = torch.device("cpu")
+    ranking_batch = Batch(
+        token_ids=torch.ones(batch_size, seq_len, dtype=torch.long, device=device),
+        attention_mask=torch.ones(batch_size, seq_len, dtype=torch.long, device=device),
+        field_ids=torch.zeros(batch_size, seq_len, dtype=torch.long, device=device),
+        entity_ids=torch.zeros(batch_size, seq_len, dtype=torch.long, device=device),
+        time_ids=torch.zeros(batch_size, seq_len, dtype=torch.long, device=device),
+        token_type_ids=torch.zeros(batch_size, seq_len, dtype=torch.long, device=device),
+        sequence_lengths=[seq_len] * batch_size,
+        labels=torch.tensor([1, -1], dtype=torch.long, device=device),
+        token_ids_b=torch.ones(batch_size, seq_len, dtype=torch.long, device=device),
+        attention_mask_b=torch.ones(batch_size, seq_len, dtype=torch.long, device=device),
+        field_ids_b=torch.zeros(batch_size, seq_len, dtype=torch.long, device=device),
+        entity_ids_b=torch.zeros(batch_size, seq_len, dtype=torch.long, device=device),
+        time_ids_b=torch.zeros(batch_size, seq_len, dtype=torch.long, device=device),
+        token_type_ids_b=torch.zeros(batch_size, seq_len, dtype=torch.long, device=device),
+        sequence_lengths_b=[seq_len] * batch_size,
+    )
+
+    trainer = Trainer(
+        model=model,
+        config=sample_training_config,
+        train_loader=None,
+        task_head=task_head,
+        loss_fn=loss_fn,
+        task_type="ranking",
+        experiment_name="test",
+    )
+
+    # Act: Forward pass and loss computation
+    scores = trainer._forward_ranking(ranking_batch)
+    loss = trainer._compute_loss(ranking_batch, scores)
+
+    # Assert
+    assert loss is not None
+    assert isinstance(loss, torch.Tensor)
+    assert loss.item() >= 0  # Loss should be non-negative
+    assert not torch.isnan(loss)
+    assert not torch.isinf(loss)
+

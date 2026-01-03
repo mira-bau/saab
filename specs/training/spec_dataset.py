@@ -45,8 +45,8 @@ def spec_dataset_getitem(fitted_preprocessor, sample_dataframe):
 
     # Assert
     assert isinstance(item, tuple)
-    assert len(item) == 3
-    seq, token_ids, encoded_tags = item
+    assert len(item) == 4  # (seq, token_ids, encoded_tags, label)
+    seq, token_ids, encoded_tags, label = item
     assert isinstance(seq, TokenizedSequence)
     assert isinstance(token_ids, list)
     assert isinstance(encoded_tags, list)
@@ -114,3 +114,102 @@ def spec_dataset_load_from_list(fitted_preprocessor, sample_dataframe):
 
         # Assert
         assert len(dataset) > 0
+
+
+# ============================================================================
+# Ranking Dataset Specs
+# ============================================================================
+
+
+def spec_dataset_ranking_load_from_csv(fitted_preprocessor, temp_data_dir):
+    """Verify dataset can load ranking pairs from CSV with sequence_a, sequence_b, label columns."""
+    # Arrange
+    csv_path = temp_data_dir / "ranking.csv"
+    # Create ranking data with sequence_a and sequence_b columns
+    df = pd.DataFrame({
+        "sequence_a": [pd.DataFrame({"name": ["Alice"], "age": [25]}), pd.DataFrame({"name": ["Bob"], "age": [30]})],
+        "sequence_b": [pd.DataFrame({"name": ["Charlie"], "age": [35]}), pd.DataFrame({"name": ["David"], "age": [40]})],
+        "label": [1, -1]
+    })
+    # Convert DataFrames to dict format for CSV
+    df["sequence_a"] = df["sequence_a"].apply(lambda x: x.to_dict("records")[0] if isinstance(x, pd.DataFrame) else x)
+    df["sequence_b"] = df["sequence_b"].apply(lambda x: x.to_dict("records")[0] if isinstance(x, pd.DataFrame) else x)
+    df.to_csv(csv_path, index=False)
+
+    # Act
+    dataset = StructuredDataset(str(csv_path), fitted_preprocessor, task_type="ranking")
+
+    # Assert
+    assert len(dataset) == 2
+    assert dataset.task_type == "ranking"
+
+
+def spec_dataset_ranking_getitem_returns_pair(fitted_preprocessor, sample_dataframe):
+    """Verify __getitem__ returns (seq_a_data, seq_b_data, label) tuple for ranking."""
+    # Arrange
+    # Create ranking data as DataFrame with sequence_a and sequence_b
+    ranking_data = pd.DataFrame({
+        "sequence_a": [
+            pd.DataFrame({"name": ["Alice"], "age": [25]}),
+            pd.DataFrame({"name": ["Bob"], "age": [30]})
+        ],
+        "sequence_b": [
+            pd.DataFrame({"name": ["Charlie"], "age": [35]}),
+            pd.DataFrame({"name": ["David"], "age": [40]})
+        ],
+        "label": [1, -1]
+    })
+    # Convert to dict format
+    ranking_data["sequence_a"] = ranking_data["sequence_a"].apply(
+        lambda x: x.to_dict("records")[0] if isinstance(x, pd.DataFrame) else x
+    )
+    ranking_data["sequence_b"] = ranking_data["sequence_b"].apply(
+        lambda x: x.to_dict("records")[0] if isinstance(x, pd.DataFrame) else x
+    )
+    dataset = StructuredDataset(ranking_data, fitted_preprocessor, task_type="ranking")
+
+    # Act
+    item = dataset[0]
+
+    # Assert
+    assert isinstance(item, tuple)
+    assert len(item) == 3
+    seq_a_data, seq_b_data, label = item
+    assert isinstance(seq_a_data, tuple)
+    assert isinstance(seq_b_data, tuple)
+    assert len(seq_a_data) == 3  # (TokenizedSequence, token_ids, encoded_tags)
+    assert len(seq_b_data) == 3
+    # Label can be int, numpy int64, or None (pandas returns numpy types)
+    assert label is None or isinstance(label, (int, type(None))) or (hasattr(label, 'item') and isinstance(label.item(), int))
+
+
+def spec_dataset_ranking_encodes_both_sequences(fitted_preprocessor, sample_dataframe):
+    """Verify both sequences are encoded separately for ranking."""
+    # Arrange
+    ranking_data = pd.DataFrame({
+        "sequence_a": [pd.DataFrame({"name": ["Alice"], "age": [25]})],
+        "sequence_b": [pd.DataFrame({"name": ["Bob"], "age": [30]})],
+        "label": [1]
+    })
+    ranking_data["sequence_a"] = ranking_data["sequence_a"].apply(
+        lambda x: x.to_dict("records")[0] if isinstance(x, pd.DataFrame) else x
+    )
+    ranking_data["sequence_b"] = ranking_data["sequence_b"].apply(
+        lambda x: x.to_dict("records")[0] if isinstance(x, pd.DataFrame) else x
+    )
+    dataset = StructuredDataset(ranking_data, fitted_preprocessor, task_type="ranking")
+
+    # Act
+    seq_a_data, seq_b_data, label = dataset[0]
+    seq_a, token_ids_a, encoded_tags_a = seq_a_data
+    seq_b, token_ids_b, encoded_tags_b = seq_b_data
+
+    # Assert
+    assert isinstance(seq_a, TokenizedSequence)
+    assert isinstance(seq_b, TokenizedSequence)
+    assert isinstance(token_ids_a, list)
+    assert isinstance(token_ids_b, list)
+    assert isinstance(encoded_tags_a, list)
+    assert isinstance(encoded_tags_b, list)
+    assert len(token_ids_a) == len(encoded_tags_a)
+    assert len(token_ids_b) == len(encoded_tags_b)
