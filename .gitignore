@@ -220,3 +220,4 @@ __marimo__/
 .DS_Store
 saab_v3/dataset/*/*
 !saab_v3/dataset/*/.gitkeep
+logs/
