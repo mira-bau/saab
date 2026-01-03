@@ -1,0 +1,74 @@
+# Example SAAB Transformer experiment configuration
+# This demonstrates a complete experiment setup for SAAB model
+
+preprocessing:
+  vocab_size: 30000
+  max_seq_len: 512
+  extractor_type: null  # null = auto-detect
+  extractor_schema: null
+  device: "auto"
+
+model:
+  # Architecture (BERT-base size)
+  d_model: 768
+  num_layers: 12
+  num_heads: 12
+  ffn_dim: 3072
+  max_seq_len: 512
+
+  # Regularization
+  dropout: 0.1
+  layer_norm_eps: 1e-5
+
+  # Embeddings
+  positional_learned: true
+
+  # SAAB-specific parameters
+  lambda_bias: 1.0  # Start with λ=1.0, then ablate (0.0, 0.5, 1.0, 2.0)
+  learnable_lambda: false
+  bias_normalization: 1.0
+
+  device: "auto"
+
+training:
+  # Optimizer (AdamW with BERT-like settings)
+  optimizer_type: "adamw"
+  learning_rate: 1e-4
+  weight_decay: 0.01
+  beta1: 0.9
+  beta2: 0.999
+  eps: 1e-8
+
+  # Learning rate schedule (linear warmup + cosine decay)
+  lr_schedule: "linear_warmup_cosine"
+  warmup_steps: 1000
+  min_lr_ratio: 0.0
+
+  # Training settings
+  batch_size: 32
+  num_epochs: 10
+  gradient_accumulation_steps: 1
+  max_grad_norm: 1.0
+  seed: 42  # Same seed for all models (Flat/Scratch/SAAB)
+
+  # Checkpointing
+  save_dir: null  # Auto: checkpoints/{experiment_name}/
+  save_epochs: 1
+  keep_checkpoints: 3
+  save_best: true
+  best_metric: "loss"
+  best_mode: "min"
+
+  # Logging
+  log_dir: null  # Auto: logs/{experiment_name}/
+  log_steps: 100
+  log_epochs: true
+  use_tensorboard: false
+  use_wandb: false
+
+  # Validation
+  eval_epochs: 1
+  eval_metrics: ["loss"]
+
+  device: "auto"
+

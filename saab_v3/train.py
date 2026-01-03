@@ -1,35 +1,40 @@
 """
-Training entrypoint script for testing preprocessing.
+Training entrypoint script for Transformer models.
 
 Usage:
-    poetry run python -m saab_v3.train --dataset-name <dataset_name>
+    poetry run python -m saab_v3.train --dataset-name <dataset_name> --model-type <model_type>
 
 Example:
-    poetry run python -m saab_v3.train --dataset-name mydataset
+    poetry run python -m saab_v3.train --dataset-name mydataset --model-type saab
 
 The dataset must be located in dataset/raw/{dataset_name}/ directory
 and should contain train.csv and val.csv files.
 
 Data locations:
 - Raw data: dataset/raw/{dataset_name}/
-- Artifacts: data/artifacts/{dataset_name}/
-- Preprocessed data: Processed on-the-fly (not cached)
+- Artifacts: dataset/artifacts/{dataset_name}/
+- Checkpoints: checkpoints/{experiment_name}/
+- Logs: logs/{experiment_name}/
 """
 
 import argparse
 from pathlib import Path
+
+from saab_v3.models import ModelConfig, create_flat_transformer, create_scratch_transformer, create_saab_transformer
 from saab_v3.training import (
     PreprocessingConfig,
     Preprocessor,
     StructuredDataset,
+    TrainingConfig,
     create_dataloader,
 )
+from saab_v3.training.trainer import Trainer
 
 # ============================================================================
 # Command-Line Arguments
 # ============================================================================
 
-parser = argparse.ArgumentParser(description="Test preprocessing pipeline on a dataset")
+parser = argparse.ArgumentParser(description="Train Transformer models on structured data")
 parser.add_argument(
     "--dataset-name",
     "--dataset",
@@ -38,18 +43,76 @@ parser.add_argument(
     dest="dataset_name",
     help="Name of the dataset directory in dataset/raw/",
 )
+parser.add_argument(
+    "--model-type",
+    "--model",
+    type=str,
+    required=True,
+    choices=["flat", "scratch", "saab"],
+    dest="model_type",
+    help="Model type: 'flat', 'scratch', or 'saab'",
+)
+parser.add_argument(
+    "--resume",
+    type=str,
+    default=None,
+    help="Path to checkpoint to resume from (optional)",
+)
+parser.add_argument(
+    "--experiment-name",
+    type=str,
+    default=None,
+    help="Experiment name (default: {dataset_name}_{model_type})",
+)
 args = parser.parse_args()
 
 dataset_name = args.dataset_name
+model_type = args.model_type
+resume_checkpoint = args.resume
+experiment_name = args.experiment_name or f"{dataset_name}_{model_type}"
 
 # ============================================================================
 # Configuration
 # ============================================================================
 
-config = PreprocessingConfig(
+# Preprocessing config
+preprocessing_config = PreprocessingConfig(
     vocab_size=30000,
     max_seq_len=512,
     device="auto",  # "auto" to auto-detect, or "cpu", "cuda", "mps"
+)
+
+# Model config
+model_config = ModelConfig(
+    d_model=768,
+    num_layers=12,
+    num_heads=12,
+    ffn_dim=3072,
+    max_seq_len=512,
+    dropout=0.1,
+    device="auto",  # Should match preprocessing_config.device
+)
+
+# Training config
+training_config = TrainingConfig(
+    optimizer_type="adamw",
+    learning_rate=1e-4,
+    weight_decay=0.01,
+    batch_size=32,
+    num_epochs=10,
+    lr_schedule="linear_warmup_cosine",
+    warmup_steps=1000,
+    gradient_accumulation_steps=1,
+    max_grad_norm=1.0,
+    seed=42,
+    log_steps=100,
+    log_epochs=True,
+    eval_epochs=1,
+    save_epochs=1,
+    save_best=True,
+    best_metric="loss",
+    best_mode="min",
+    device="auto",  # Should match preprocessing_config.device
 )
 
 # ============================================================================
@@ -82,7 +145,7 @@ if not val_path.exists():
     raise FileNotFoundError(f"Validation file not found: {val_path}")
 
 # Initialize preprocessor
-preprocessor = Preprocessor(config)
+preprocessor = Preprocessor(preprocessing_config)
 
 # Fit on training data (builds vocabularies)
 print(f"Fitting preprocessor on training data from {train_path}...")
@@ -99,62 +162,71 @@ val_dataset = StructuredDataset(str(val_path), preprocessor, split="val")
 
 # Create dataloaders
 print("Creating dataloaders...")
-# Device flows automatically from config - no need to pass it
 train_loader = create_dataloader(
     train_dataset,
-    batch_size=32,
+    batch_size=training_config.batch_size,
     shuffle=True,
 )
 
 val_loader = create_dataloader(
     val_dataset,
-    batch_size=32,
+    batch_size=training_config.batch_size,
     shuffle=False,
 )
 
 # ============================================================================
-# Verify Preprocessing (Iterate through batches)
+# Model Creation
 # ============================================================================
 
-print("\nVerifying preprocessing by iterating through batches...")
-print("=" * 50)
+print(f"\nCreating {model_type.upper()} model...")
 
-# Check training batches
-print("\nTraining batches:")
-for batch_idx, batch in enumerate(train_loader):
-    print(f"  Batch {batch_idx}:")
-    print(f"    - token_ids shape: {batch.token_ids.shape}")
-    print(f"    - attention_mask shape: {batch.attention_mask.shape}")
-    print(f"    - field_ids shape: {batch.field_ids.shape}")
-    print(f"    - entity_ids shape: {batch.entity_ids.shape}")
-    print(f"    - time_ids shape: {batch.time_ids.shape}")
-    print(f"    - token_type_ids shape: {batch.token_type_ids.shape}")
-    if batch.edge_ids is not None:
-        print(f"    - edge_ids shape: {batch.edge_ids.shape}")
-    if batch.role_ids is not None:
-        print(f"    - role_ids shape: {batch.role_ids.shape}")
-    print(f"    - sequence_lengths: {batch.sequence_lengths}")
+if model_type == "flat":
+    model = create_flat_transformer(preprocessor, model_config)
+elif model_type == "scratch":
+    model = create_scratch_transformer(preprocessor, model_config)
+elif model_type == "saab":
+    model = create_saab_transformer(preprocessor, model_config)
+else:
+    raise ValueError(f"Unknown model_type: {model_type}")
 
-    # Only show first few batches
-    if batch_idx >= 2:
-        print("    ... (showing first 3 batches)")
-        break
+print(f"Model created: {model.__class__.__name__}")
+print(f"  - d_model: {model.d_model}")
+print(f"  - num_layers: {model.num_layers}")
+print(f"  - num_heads: {model.num_heads}")
 
-# Check validation batches
-print("\nValidation batches:")
-for batch_idx, batch in enumerate(val_loader):
-    print(
-        f"  Batch {batch_idx}: batch_size={batch.token_ids.shape[0]}, "
-        f"seq_len={batch.token_ids.shape[1]}"
-    )
-    if batch_idx >= 2:
-        print("  ... (showing first 3 batches)")
-        break
+# ============================================================================
+# Training
+# ============================================================================
 
-print("\n" + "=" * 50)
-print("Preprocessing verification complete!")
-print(f"\nTotal training batches: {len(train_loader)}")
-print(f"Total validation batches: {len(val_loader)}")
+print(f"\nInitializing trainer for experiment: {experiment_name}...")
+trainer = Trainer(
+    model=model,
+    config=training_config,
+    train_loader=train_loader,
+    val_loader=val_loader,
+    experiment_name=experiment_name,
+)
+
+# Resume from checkpoint if provided
+if resume_checkpoint:
+    print(f"Resuming from checkpoint: {resume_checkpoint}")
+    trainer.load_checkpoint(checkpoint_path=resume_checkpoint, resume=True)
+
+# Run training
+print("\nStarting training...")
+print("=" * 60)
+history = trainer.train()
+print("=" * 60)
+print("\nTraining complete!")
+
+# Print summary
+print(f"\nTraining Summary:")
+print(f"  - Total epochs: {len(history['train_losses'])}")
+print(f"  - Final train loss: {history['train_losses'][-1]:.6f}")
+if history["val_losses"]:
+    print(f"  - Final val loss: {history['val_losses'][-1]:.6f}")
+print(f"  - Checkpoints saved to: {trainer.checkpoint_manager.save_dir}")
+print(f"  - Logs saved to: {trainer.metrics_logger.log_dir}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,26 @@
+# Default model configuration
+# This file can be used as a base for model experiments
+
+model:
+  # Architecture hyperparameters
+  d_model: 768
+  num_layers: 12
+  num_heads: 12
+  ffn_dim: 3072
+  max_seq_len: 512
+
+  # Regularization
+  dropout: 0.1
+  layer_norm_eps: 1e-5
+
+  # Embeddings
+  positional_learned: true  # true = learned, false = sinusoidal
+
+  # SAAB-specific (only used for SAABTransformer)
+  lambda_bias: 1.0  # Bias strength parameter (λ)
+  learnable_lambda: false  # If true, lambda is learnable
+  bias_normalization: 1.0  # Normalization factor for structural bias
+
+  # Device
+  device: "auto"  # "cpu", "cuda", "mps", "auto"
+

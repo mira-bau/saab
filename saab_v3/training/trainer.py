@@ -1,0 +1,433 @@
+"""Training orchestrator for Transformer models."""
+
+import random
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import numpy as np
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+
+from saab_v3.data.structures import Batch
+from saab_v3.training.checkpoint import CheckpointManager
+from saab_v3.training.loss import create_loss_fn
+from saab_v3.training.metrics import MetricsLogger
+from saab_v3.training.schedulers import create_lr_scheduler
+from saab_v3.utils.device import get_device
+
+if TYPE_CHECKING:
+    from saab_v3.training.config import TrainingConfig
+
+
+class Trainer:
+    """Training orchestrator for Transformer models."""
+
+    def __init__(
+        self,
+        model: nn.Module,
+        config: "TrainingConfig",
+        train_loader: DataLoader,
+        val_loader: DataLoader | None = None,
+        loss_fn: nn.Module | None = None,
+        task_head: nn.Module | None = None,  # For future task heads
+        experiment_name: str = "experiment",
+    ):
+        """Initialize trainer.
+
+        Args:
+            model: Transformer model (Flat/Scratch/SAAB)
+            config: TrainingConfig instance
+            train_loader: Training DataLoader
+            val_loader: Optional validation DataLoader
+            loss_fn: Loss function (default: CrossEntropyLoss for classification)
+            task_head: Optional task head (for future use)
+            experiment_name: Name of experiment (for checkpoint/logging directories)
+        """
+        self.model = model
+        self.config = config
+        self.train_loader = train_loader
+        self.val_loader = val_loader
+        self.task_head = task_head
+        self.experiment_name = experiment_name
+
+        # Set random seeds for reproducibility
+        self._set_random_seeds(config.seed)
+
+        # Move model to device
+        device = get_device(config.device)
+        self.model = self.model.to(device)
+        if self.task_head is not None:
+            self.task_head = self.task_head.to(device)
+
+        # Loss function
+        if loss_fn is None:
+            # Default to classification loss (will be replaced when task heads are added)
+            self.loss_fn = nn.CrossEntropyLoss()
+        else:
+            self.loss_fn = loss_fn
+        self.loss_fn = self.loss_fn.to(device)
+
+        # Create optimizer
+        self.optimizer = self._create_optimizer()
+
+        # Calculate number of training steps
+        num_training_steps = self._calculate_training_steps()
+
+        # Create LR scheduler
+        self.scheduler = create_lr_scheduler(
+            self.optimizer, config, num_training_steps
+        )
+
+        # Checkpoint manager
+        save_dir = config.save_dir or Path("checkpoints") / experiment_name
+        self.checkpoint_manager = CheckpointManager(
+            save_dir=save_dir, keep_checkpoints=config.keep_checkpoints
+        )
+
+        # Metrics logger
+        self.metrics_logger = MetricsLogger(config, experiment_name)
+
+        # Training state
+        self.current_epoch = 0
+        self.current_step = 0
+        self.best_metric_value: float | None = None
+
+        # Config for checkpointing
+        self._config_dict = {
+            "training_config": config.model_dump() if hasattr(config, "model_dump") else {},
+        }
+
+    def _set_random_seeds(self, seed: int):
+        """Set all random seeds for reproducibility."""
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        # Set deterministic operations (may impact performance)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+
+    def _create_optimizer(self) -> torch.optim.Optimizer:
+        """Create optimizer from config."""
+        if self.config.optimizer_type == "adam":
+            return torch.optim.Adam(
+                self.model.parameters(),
+                lr=self.config.learning_rate,
+                betas=(self.config.beta1, self.config.beta2),
+                eps=self.config.eps,
+                weight_decay=self.config.weight_decay,
+            )
+        elif self.config.optimizer_type == "adamw":
+            return torch.optim.AdamW(
+                self.model.parameters(),
+                lr=self.config.learning_rate,
+                betas=(self.config.beta1, self.config.beta2),
+                eps=self.config.eps,
+                weight_decay=self.config.weight_decay,
+            )
+        else:
+            raise ValueError(f"Unknown optimizer_type: {self.config.optimizer_type}")
+
+    def _calculate_training_steps(self) -> int:
+        """Calculate total number of training steps."""
+        if self.config.max_steps is not None:
+            return self.config.max_steps
+
+        if self.config.num_epochs is None:
+            raise ValueError("Either num_epochs or max_steps must be set")
+
+        steps_per_epoch = len(self.train_loader) // self.config.gradient_accumulation_steps
+        return self.config.num_epochs * steps_per_epoch
+
+    def train(self) -> dict:
+        """Run training loop.
+
+        Returns:
+            Dictionary with training history (losses, metrics, etc.)
+        """
+        history = {
+            "train_losses": [],
+            "val_losses": [],
+            "train_metrics": [],
+            "val_metrics": [],
+        }
+
+        # Determine training duration
+        if self.config.num_epochs is not None:
+            total_epochs = self.config.num_epochs
+        else:
+            # Calculate epochs from max_steps
+            steps_per_epoch = len(self.train_loader) // self.config.gradient_accumulation_steps
+            total_epochs = (self.config.max_steps // steps_per_epoch) + 1
+
+        print(f"Starting training for {total_epochs} epochs...")
+        print(f"Total steps: {self._calculate_training_steps()}")
+        print(f"Device: {get_device(self.config.device)}")
+
+        for epoch in range(total_epochs):
+            self.current_epoch = epoch
+
+            # Train epoch
+            train_metrics = self._train_epoch(epoch)
+            history["train_losses"].append(train_metrics.get("loss", 0.0))
+            history["train_metrics"].append(train_metrics)
+
+            # Validate
+            if self.val_loader is not None and (epoch + 1) % self.config.eval_epochs == 0:
+                val_metrics = self._validate()
+                history["val_losses"].append(val_metrics.get("loss", 0.0))
+                history["val_metrics"].append(val_metrics)
+
+                # Check if this is the best model
+                if self.config.save_best:
+                    self._check_and_save_best(val_metrics, epoch)
+
+            # Save checkpoint (epoch-based)
+            if (
+                self.config.save_epochs is not None
+                and (epoch + 1) % self.config.save_epochs == 0
+            ):
+                self._save_checkpoint(epoch, train_metrics, is_latest=True)
+
+            # Check if we've reached max_steps
+            if self.config.max_steps is not None and self.current_step >= self.config.max_steps:
+                print(f"Reached max_steps ({self.config.max_steps}), stopping training.")
+                break
+
+        # Save final checkpoint
+        self._save_checkpoint(self.current_epoch, train_metrics, is_latest=True)
+
+        # Cleanup
+        self.metrics_logger.close()
+        self.checkpoint_manager.cleanup_old_checkpoints()
+
+        return history
+
+    def _train_epoch(self, epoch: int) -> dict:
+        """Train for one epoch."""
+        self.model.train()
+        if self.task_head is not None:
+            self.task_head.train()
+
+        epoch_losses = []
+        epoch_metrics = {}
+
+        for batch_idx, batch in enumerate(self.train_loader):
+            # Move batch to device
+            batch = batch.to(get_device(self.config.device))
+
+            # Training step
+            step_metrics = self._step(batch)
+
+            epoch_losses.append(step_metrics["loss"])
+
+            # Log step metrics
+            if self.current_step % self.config.log_steps == 0:
+                self.metrics_logger.log_step(
+                    self.current_step, step_metrics, phase="train"
+                )
+
+            # Save checkpoint (step-based)
+            if (
+                self.config.save_steps is not None
+                and self.current_step % self.config.save_steps == 0
+            ):
+                self._save_checkpoint(epoch, step_metrics, is_latest=False)
+
+            # Validate (step-based)
+            if (
+                self.val_loader is not None
+                and self.config.eval_steps is not None
+                and self.current_step % self.config.eval_steps == 0
+            ):
+                val_metrics = self._validate()
+                if self.config.save_best:
+                    self._check_and_save_best(val_metrics, epoch)
+
+            self.current_step += 1
+
+            # Check if we've reached max_steps
+            if self.config.max_steps is not None and self.current_step >= self.config.max_steps:
+                break
+
+        # Calculate epoch averages
+        epoch_metrics["loss"] = sum(epoch_losses) / len(epoch_losses) if epoch_losses else 0.0
+
+        # Log epoch metrics
+        if self.config.log_epochs:
+            self.metrics_logger.log_epoch(epoch, epoch_metrics, phase="train")
+
+        return epoch_metrics
+
+    def _step(self, batch: Batch) -> dict:
+        """Single training step."""
+        # Forward pass
+        outputs = self.model(batch)
+
+        # Apply task head if available
+        if self.task_head is not None:
+            outputs = self.task_head(outputs)
+
+        # Compute loss
+        # NOTE: For now, this is a placeholder. When task heads are added,
+        # the loss computation will use actual labels from the batch.
+        # For now, we'll compute a dummy loss for testing purposes.
+        loss = self._compute_loss(batch, outputs)
+
+        # Backward pass (with gradient accumulation)
+        loss = loss / self.config.gradient_accumulation_steps
+        loss.backward()
+
+        step_metrics = {"loss": loss.item() * self.config.gradient_accumulation_steps}
+
+        # Update weights (if gradient accumulation is complete)
+        if (self.current_step + 1) % self.config.gradient_accumulation_steps == 0:
+            # Gradient clipping
+            if self.config.max_grad_norm > 0:
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(), self.config.max_grad_norm
+                )
+                step_metrics["grad_norm"] = grad_norm.item()
+
+            # Optimizer step
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+
+            # LR scheduler step
+            if self.scheduler is not None:
+                self.scheduler.step()
+                step_metrics["learning_rate"] = self.scheduler.get_last_lr()[0]
+
+        return step_metrics
+
+    def _compute_loss(self, batch: Batch, outputs: torch.Tensor) -> torch.Tensor:
+        """Compute loss for batch.
+
+        NOTE: This is a placeholder implementation. When task heads are added,
+        this will compute the actual loss using labels from the batch.
+
+        Args:
+            batch: Batch object
+            outputs: Model outputs
+
+        Returns:
+            Loss tensor
+        """
+        # For now, return a dummy loss for testing
+        # This will be replaced when task heads are implemented
+        # The actual loss will depend on the task type and labels in the batch
+        if self.task_head is None:
+            # Dummy loss: mean of output values (for testing only)
+            return outputs.mean()
+        else:
+            # When task heads are added, compute actual loss here
+            # For example: loss = self.loss_fn(outputs, batch.labels)
+            raise NotImplementedError(
+                "Loss computation with task heads not yet implemented. "
+                "This will be added when task heads are implemented."
+            )
+
+    def _validate(self) -> dict:
+        """Run validation."""
+        self.model.eval()
+        if self.task_head is not None:
+            self.task_head.eval()
+
+        val_losses = []
+        val_metrics = {}
+
+        with torch.no_grad():
+            for batch in self.val_loader:
+                # Move batch to device
+                batch = batch.to(get_device(self.config.device))
+
+                # Forward pass
+                outputs = self.model(batch)
+
+                # Apply task head if available
+                if self.task_head is not None:
+                    outputs = self.task_head(outputs)
+
+                # Compute loss
+                loss = self._compute_loss(batch, outputs)
+                val_losses.append(loss.item())
+
+        # Calculate validation metrics
+        val_metrics["loss"] = sum(val_losses) / len(val_losses) if val_losses else 0.0
+
+        # Log validation metrics
+        self.metrics_logger.log_epoch(self.current_epoch, val_metrics, phase="val")
+
+        return val_metrics
+
+    def _check_and_save_best(self, val_metrics: dict, epoch: int):
+        """Check if current model is best and save if so."""
+        metric_value = val_metrics.get(self.config.best_metric, float("inf"))
+
+        is_best = False
+        if self.best_metric_value is None:
+            is_best = True
+            self.best_metric_value = metric_value
+        elif self.config.best_mode == "min":
+            if metric_value < self.best_metric_value:
+                is_best = True
+                self.best_metric_value = metric_value
+        elif self.config.best_mode == "max":
+            if metric_value > self.best_metric_value:
+                is_best = True
+                self.best_metric_value = metric_value
+
+        if is_best:
+            self._save_checkpoint(epoch, val_metrics, is_best=True)
+
+    def _save_checkpoint(
+        self, epoch: int, metrics: dict, is_best: bool = False, is_latest: bool = False
+    ):
+        """Save checkpoint."""
+        self.checkpoint_manager.save_checkpoint(
+            model=self.model,
+            optimizer=self.optimizer,
+            scheduler=self.scheduler,
+            epoch=epoch,
+            step=self.current_step,
+            metrics=metrics,
+            is_best=is_best,
+            is_latest=is_latest,
+            config=self._config_dict,
+        )
+
+    def load_checkpoint(
+        self, checkpoint_path: str | None = None, resume: bool = True
+    ) -> dict:
+        """Load checkpoint and optionally resume training.
+
+        Args:
+            checkpoint_path: Path to checkpoint file (None = load latest)
+            resume: If True, resume training from checkpoint
+
+        Returns:
+            Dictionary with loaded state
+        """
+        if checkpoint_path is None:
+            checkpoint_path = self.checkpoint_manager.get_latest_checkpoint()
+            if checkpoint_path is None:
+                raise FileNotFoundError("No checkpoint found to load")
+
+        checkpoint_path = Path(checkpoint_path)
+
+        state = self.checkpoint_manager.load_checkpoint(
+            checkpoint_path=checkpoint_path,
+            model=self.model,
+            optimizer=self.optimizer if resume else None,
+            scheduler=self.scheduler if resume else None,
+        )
+
+        if resume:
+            self.current_epoch = state["epoch"]
+            self.current_step = state["step"]
+            if "metrics" in state and self.config.best_metric in state["metrics"]:
+                self.best_metric_value = state["metrics"][self.config.best_metric]
+
+        return state
+
