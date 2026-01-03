@@ -10,27 +10,32 @@ from saab_v3.data.structures import Batch, EncodedTag, StructureTag, TokenizedSe
 class Batcher:
     """Batches encoded sequences with dynamic padding."""
 
-    def __init__(self, max_seq_len: int = 512, pad_token_id: int = PAD_IDX):
+    def __init__(
+        self,
+        max_seq_len: int = 512,
+        pad_token_id: int = PAD_IDX,
+        device: torch.device | None = None,
+    ):
         """Initialize batcher.
 
         Args:
             max_seq_len: Maximum sequence length (truncate if longer)
             pad_token_id: Token ID for padding (default 0 = [PAD])
+            device: Device to place tensors on (defaults to CPU if None)
         """
         self.max_seq_len = max_seq_len
         self.pad_token_id = pad_token_id
+        self.device = device if device is not None else torch.device("cpu")
 
     def batch(
         self,
         sequences: list[tuple[TokenizedSequence, list[int], list[EncodedTag]]],
-        device: str | torch.device = "cpu",
         preserve_original_tags: bool = False,
     ) -> Batch:
         """Create batch from encoded sequences.
 
         Args:
             sequences: List of (TokenizedSequence, token_ids, encoded_tags) tuples
-            device: Device to place tensors on (cpu, cuda, mps)
             preserve_original_tags: If True, preserve original StructureTag objects for SAAB bias computation
 
         Returns:
@@ -109,7 +114,7 @@ class Batcher:
             padded_token_ids,
             attention_masks,
             tag_indices,
-            device,
+            self.device,
         )
 
         # 9. Create Batch object
@@ -279,7 +284,7 @@ class Batcher:
         token_ids: list[list[int]],
         attention_masks: list[list[int]],
         tag_indices: dict[str, list[list[int]]],
-        device: str | torch.device,
+        device: torch.device,
     ) -> dict[str, torch.Tensor]:
         """Convert lists to PyTorch tensors.
 

@@ -14,11 +14,11 @@ from saab_v3.data.constants import PAD_IDX
 def spec_batcher_basic_batching(sample_encoded_sequences):
     """Verify Batcher creates batches with same-length sequences."""
     # Arrange
-    batcher = Batcher(max_seq_len=512)
+    batcher = Batcher(max_seq_len=512, device=torch.device("cpu"))
     sequences = sample_encoded_sequences
 
     # Act
-    batch = batcher.batch(sequences, device="cpu")
+    batch = batcher.batch(sequences)
 
     # Assert
     assert batch.token_ids.shape[0] == len(sequences)  # batch_size
@@ -32,11 +32,11 @@ def spec_batcher_basic_batching(sample_encoded_sequences):
 def spec_batcher_dynamic_padding(sample_encoded_sequences_different_lengths):
     """Verify Batcher pads sequences to max length in batch."""
     # Arrange
-    batcher = Batcher(max_seq_len=512)
+    batcher = Batcher(max_seq_len=512, device=torch.device("cpu"))
     sequences = sample_encoded_sequences_different_lengths
 
     # Act
-    batch = batcher.batch(sequences, device="cpu")
+    batch = batcher.batch(sequences)
 
     # Assert
     # Find max length in original sequences
@@ -57,11 +57,13 @@ def spec_batcher_dynamic_padding(sample_encoded_sequences_different_lengths):
 def spec_batcher_truncation(sample_encoded_sequences):
     """Verify Batcher truncates sequences longer than max_seq_len."""
     # Arrange
-    batcher = Batcher(max_seq_len=1)  # Very short max length
+    batcher = Batcher(
+        max_seq_len=1, device=torch.device("cpu")
+    )  # Very short max length
     sequences = sample_encoded_sequences
 
     # Act
-    batch = batcher.batch(sequences, device="cpu")
+    batch = batcher.batch(sequences)
 
     # Assert
     # Verify all sequences are truncated to max_seq_len
@@ -77,11 +79,11 @@ def spec_batcher_truncation(sample_encoded_sequences):
 def spec_batcher_attention_masks(sample_encoded_sequences_different_lengths):
     """Verify Batcher creates correct attention masks."""
     # Arrange
-    batcher = Batcher(max_seq_len=512)
+    batcher = Batcher(max_seq_len=512, device=torch.device("cpu"))
     sequences = sample_encoded_sequences_different_lengths
 
     # Act
-    batch = batcher.batch(sequences, device="cpu")
+    batch = batcher.batch(sequences)
 
     # Assert
     # Verify attention masks are binary (0 or 1)
@@ -101,13 +103,13 @@ def spec_batcher_optional_tags(
 ):
     """Verify Batcher handles optional tags (edge_ids, role_ids) correctly."""
     # Arrange
-    batcher = Batcher(max_seq_len=512)
+    batcher = Batcher(max_seq_len=512, device=torch.device("cpu"))
 
     # Test sequences with edges/roles
     sequences_with_edges = sample_encoded_sequences_with_edges_roles
 
     # Act
-    batch_with_edges = batcher.batch(sequences_with_edges, device="cpu")
+    batch_with_edges = batcher.batch(sequences_with_edges)
 
     # Assert
     # Sequences with edges/roles should have tensors
@@ -125,11 +127,11 @@ def spec_batcher_optional_tags(
 def spec_batcher_tensor_shapes(sample_encoded_sequences):
     """Verify all tensors have consistent [batch_size, seq_len] shapes."""
     # Arrange
-    batcher = Batcher(max_seq_len=512)
+    batcher = Batcher(max_seq_len=512, device=torch.device("cpu"))
     sequences = sample_encoded_sequences
 
     # Act
-    batch = batcher.batch(sequences, device="cpu")
+    batch = batcher.batch(sequences)
 
     # Assert
     batch_size = batch.token_ids.shape[0]
@@ -150,11 +152,11 @@ def spec_batcher_tensor_shapes(sample_encoded_sequences):
 def spec_batcher_sequence_metadata(sample_encoded_sequences):
     """Verify Batcher preserves sequence metadata (lengths, IDs)."""
     # Arrange
-    batcher = Batcher(max_seq_len=512)
+    batcher = Batcher(max_seq_len=512, device=torch.device("cpu"))
     sequences = sample_encoded_sequences
 
     # Act
-    batch = batcher.batch(sequences, device="cpu")
+    batch = batcher.batch(sequences)
 
     # Assert
     # Verify sequence_lengths are correct
@@ -167,3 +169,83 @@ def spec_batcher_sequence_metadata(sample_encoded_sequences):
     assert len(batch.sequence_ids) == len(sequences)
     for i, (seq, _, _) in enumerate(sequences):
         assert batch.sequence_ids[i] == seq.sequence_id
+
+
+# ============================================================================
+# Batcher Device Tests
+# ============================================================================
+
+
+def spec_batcher_device_from_init(sample_encoded_sequences):
+    """Verify Batcher stores device from __init__() and uses it correctly."""
+    # Arrange
+    cpu_device = torch.device("cpu")
+    batcher = Batcher(max_seq_len=512, device=cpu_device)
+    sequences = sample_encoded_sequences
+
+    # Act
+    batch = batcher.batch(sequences)
+
+    # Assert
+    # Verify Batcher stores device
+    assert batcher.device == cpu_device
+    # Verify tensors are placed on correct device
+    assert batch.token_ids.device == cpu_device
+    assert batch.attention_mask.device == cpu_device
+    assert batch.field_ids.device == cpu_device
+    assert batch.entity_ids.device == cpu_device
+    assert batch.time_ids.device == cpu_device
+    assert batch.token_type_ids.device == cpu_device
+
+    # Test with MPS if available
+    if torch.backends.mps.is_available():
+        mps_device = torch.device("mps")
+        batcher_mps = Batcher(max_seq_len=512, device=mps_device)
+        batch_mps = batcher_mps.batch(sequences)
+        assert batcher_mps.device.type == mps_device.type
+        assert batch_mps.token_ids.device.type == mps_device.type
+
+
+def spec_batcher_device_default(sample_encoded_sequences):
+    """Verify Batcher defaults to CPU if device not provided."""
+    # Arrange
+    batcher = Batcher(max_seq_len=512)  # No device parameter
+    sequences = sample_encoded_sequences
+
+    # Act
+    batch = batcher.batch(sequences)
+
+    # Assert
+    # Should default to CPU
+    assert batcher.device == torch.device("cpu")
+    assert batch.token_ids.device.type == "cpu"
+
+    # Test with device=None explicitly
+    batcher_none = Batcher(max_seq_len=512, device=None)
+    batch_none = batcher_none.batch(sequences)
+    assert batcher_none.device == torch.device("cpu")
+    assert batch_none.token_ids.device.type == "cpu"
+
+
+def spec_batcher_device_consistency(sample_encoded_sequences):
+    """Verify all tensors in batch are on same device."""
+    # Arrange
+    cpu_device = torch.device("cpu")
+    batcher = Batcher(max_seq_len=512, device=cpu_device)
+    sequences = sample_encoded_sequences
+
+    # Act
+    batch = batcher.batch(sequences)
+
+    # Assert
+    # All tensors should be on the same device
+    expected_device = batcher.device
+    assert batch.token_ids.device == expected_device
+    assert batch.attention_mask.device == expected_device
+    assert batch.field_ids.device == expected_device
+    assert batch.entity_ids.device == expected_device
+    assert batch.time_ids.device == expected_device
+    assert batch.token_type_ids.device == expected_device
+
+    # Verify device matches Batcher's stored device
+    assert batch.token_ids.device == batcher.device

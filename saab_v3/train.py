@@ -50,7 +50,7 @@ config = PreprocessingConfig(
     vocab_size=30000,
     max_seq_len=512,
     preserve_original_tags=True,  # Set to True for SAAB Transformer
-    device="cpu",  # Change to "cuda" or "mps" if available
+    device="auto",  # "auto" to auto-detect, or "cpu", "cuda", "mps"
 )
 
 # ============================================================================
@@ -100,11 +100,11 @@ val_dataset = StructuredDataset(str(val_path), preprocessor, split="val")
 
 # Create dataloaders
 print("Creating dataloaders...")
+# Device flows automatically from config - no need to pass it
 train_loader = create_dataloader(
     train_dataset,
     batch_size=32,
     shuffle=True,
-    device=config.device,
     preserve_original_tags=config.preserve_original_tags,
 )
 
@@ -112,7 +112,6 @@ val_loader = create_dataloader(
     val_dataset,
     batch_size=32,
     shuffle=False,
-    device=config.device,
     preserve_original_tags=config.preserve_original_tags,
 )
 

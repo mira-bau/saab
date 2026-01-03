@@ -1,5 +1,7 @@
 """Specs for Batcher SAAB functionality - preserving original tags."""
 
+import torch
+
 from saab_v3.data.batcher import Batcher
 from saab_v3.data.constants import PAD_TAG_FIELD
 
@@ -12,11 +14,11 @@ from saab_v3.data.constants import PAD_TAG_FIELD
 def spec_batcher_preserve_original_tags_false(sample_encoded_sequences):
     """Verify original_tags is None when preserve_original_tags=False."""
     # Arrange
-    batcher = Batcher(max_seq_len=512)
+    batcher = Batcher(max_seq_len=512, device=torch.device("cpu"))
     sequences = sample_encoded_sequences
 
     # Act
-    batch = batcher.batch(sequences, device="cpu", preserve_original_tags=False)
+    batch = batcher.batch(sequences, preserve_original_tags=False)
 
     # Assert
     assert batch.original_tags is None
@@ -25,11 +27,11 @@ def spec_batcher_preserve_original_tags_false(sample_encoded_sequences):
 def spec_batcher_preserve_original_tags_true(sample_encoded_sequences):
     """Verify original_tags is populated when preserve_original_tags=True."""
     # Arrange
-    batcher = Batcher(max_seq_len=512)
+    batcher = Batcher(max_seq_len=512, device=torch.device("cpu"))
     sequences = sample_encoded_sequences
 
     # Act
-    batch = batcher.batch(sequences, device="cpu", preserve_original_tags=True)
+    batch = batcher.batch(sequences, preserve_original_tags=True)
 
     # Assert
     assert batch.original_tags is not None
@@ -45,11 +47,11 @@ def spec_batcher_preserve_original_tags_true(sample_encoded_sequences):
 def spec_batcher_original_tags_same_length(sample_encoded_sequences):
     """Verify original tags preserved correctly for same-length sequences."""
     # Arrange
-    batcher = Batcher(max_seq_len=512)
+    batcher = Batcher(max_seq_len=512, device=torch.device("cpu"))
     sequences = sample_encoded_sequences
 
     # Act
-    batch = batcher.batch(sequences, device="cpu", preserve_original_tags=True)
+    batch = batcher.batch(sequences, preserve_original_tags=True)
 
     # Assert
     assert batch.original_tags is not None
@@ -65,11 +67,11 @@ def spec_batcher_original_tags_different_lengths(
 ):
     """Verify original tags padded correctly for different-length sequences."""
     # Arrange
-    batcher = Batcher(max_seq_len=512)
+    batcher = Batcher(max_seq_len=512, device=torch.device("cpu"))
     sequences = sample_encoded_sequences_different_lengths
 
     # Act
-    batch = batcher.batch(sequences, device="cpu", preserve_original_tags=True)
+    batch = batcher.batch(sequences, preserve_original_tags=True)
 
     # Assert
     assert batch.original_tags is not None
@@ -88,11 +90,11 @@ def spec_batcher_original_tags_different_lengths(
 def spec_batcher_original_tags_truncation(sample_encoded_sequences):
     """Verify original tags truncated correctly when sequence exceeds max_seq_len."""
     # Arrange
-    batcher = Batcher(max_seq_len=1)  # Very short max length
+    batcher = Batcher(max_seq_len=1, device=torch.device("cpu"))  # Very short max length
     sequences = sample_encoded_sequences
 
     # Act
-    batch = batcher.batch(sequences, device="cpu", preserve_original_tags=True)
+    batch = batcher.batch(sequences, preserve_original_tags=True)
 
     # Assert
     assert batch.original_tags is not None
@@ -106,11 +108,11 @@ def spec_batcher_original_tags_truncation(sample_encoded_sequences):
 def spec_batcher_original_tags_shape_validation(sample_encoded_sequences):
     """Verify Batch validation ensures original_tags shape matches token_ids."""
     # Arrange
-    batcher = Batcher(max_seq_len=512)
+    batcher = Batcher(max_seq_len=512, device=torch.device("cpu"))
     sequences = sample_encoded_sequences
 
     # Act
-    batch = batcher.batch(sequences, device="cpu", preserve_original_tags=True)
+    batch = batcher.batch(sequences, preserve_original_tags=True)
 
     # Assert
     # Batch validation should pass (implicitly tested by Batch creation)

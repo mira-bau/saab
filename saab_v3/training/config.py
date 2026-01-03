@@ -1,11 +1,16 @@
 """Preprocessing configuration model."""
 
 from pathlib import Path
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import ConfigDict, field_validator
+
+from saab_v3.config.base import BaseConfig
 
 
-class PreprocessingConfig(BaseModel):
-    """Configuration for preprocessing pipeline."""
+class PreprocessingConfig(BaseConfig):
+    """Configuration for preprocessing pipeline.
+
+    Inherits device field from BaseConfig.
+    """
 
     model_config = ConfigDict(validate_assignment=True, frozen=False)
 
@@ -16,7 +21,7 @@ class PreprocessingConfig(BaseModel):
         False  # True for SAAB (preserve StructureTag objects)
     )
     extractor_schema: dict | None = None  # Optional schema for extractors
-    device: str = "cpu"  # "cpu", "cuda", "mps"
+    # device inherited from BaseConfig
     data_dir: Path | None = None  # Override default data/ directory (optional)
 
     @field_validator("vocab_size")
@@ -43,14 +48,6 @@ class PreprocessingConfig(BaseModel):
             raise ValueError(
                 f"extractor_type must be one of ['table', 'json', 'graph', None], got {v}"
             )
-        return v
-
-    @field_validator("device")
-    @classmethod
-    def validate_device(cls, v: str) -> str:
-        """Validate that device is valid."""
-        if v not in ["cpu", "cuda", "mps"]:
-            raise ValueError(f"device must be one of ['cpu', 'cuda', 'mps'], got {v}")
         return v
 
     @field_validator("data_dir")

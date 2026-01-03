@@ -1,0 +1,1 @@
+"""Specs for configuration modules."""
