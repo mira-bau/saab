@@ -3,7 +3,7 @@
 import torch
 import torch.nn as nn
 
-from saab_v3.data.structures import Batch, StructureTag
+from saab_v3.data.structures import Batch
 from saab_v3.models.components.saab_encoder_layer import SAABEncoderLayer
 from saab_v3.models.embeddings.combined_embedding import CombinedEmbedding
 
@@ -98,7 +98,8 @@ class SAABTransformer(nn.Module):
 
         Args:
             batch: Batch object with token and tag indices.
-                Must have batch.original_tags if lambda_bias != 0
+                Tag indices (field_ids, entity_ids, time_ids, token_type_ids) are required
+                when lambda_bias != 0. These are always present in Batch.
             return_attention_weights: Whether to return attention weights from all layers
 
         Returns:
@@ -109,14 +110,24 @@ class SAABTransformer(nn.Module):
                 Each attention weight tensor has shape [batch_size, num_heads, seq_len, seq_len]
 
         Raises:
-            ValueError: If original_tags is None when lambda_bias != 0
+            ValueError: If required tag indices are missing (should not happen with valid Batch)
         """
-        # Validate original_tags if needed
-        if self.lambda_bias != 0.0 and batch.original_tags is None:
-            raise ValueError(
-                "batch.original_tags is required for SAAB Transformer when lambda_bias != 0. "
-                "Set preserve_original_tags=True in preprocessing."
-            )
+        # Extract tag indices from batch
+        field_ids = batch.field_ids
+        entity_ids = batch.entity_ids
+        time_ids = batch.time_ids
+        token_type_ids = batch.token_type_ids
+        edge_ids = batch.edge_ids  # May be None
+        role_ids = batch.role_ids  # May be None
+
+        # Validate required indices if lambda != 0
+        # These should always be present in Batch, but check for safety
+        if self.lambda_bias != 0.0:
+            if field_ids is None or entity_ids is None or time_ids is None or token_type_ids is None:
+                raise ValueError(
+                    "Required tag indices (field_ids, entity_ids, time_ids, token_type_ids) "
+                    "are missing from Batch. This should not happen with a valid Batch object."
+                )
 
         # Apply embeddings
         x = self.embeddings(batch)  # [batch_size, seq_len, d_model]
@@ -128,7 +139,12 @@ class SAABTransformer(nn.Module):
                 x, attn_weights = layer(
                     x,
                     attention_mask=batch.attention_mask,
-                    original_tags=batch.original_tags,
+                    field_ids=field_ids,
+                    entity_ids=entity_ids,
+                    time_ids=time_ids,
+                    token_type_ids=token_type_ids,
+                    edge_ids=edge_ids,
+                    role_ids=role_ids,
                     return_attention_weights=True,
                 )
                 attention_weights_list.append(attn_weights)
@@ -136,7 +152,12 @@ class SAABTransformer(nn.Module):
                 x = layer(
                     x,
                     attention_mask=batch.attention_mask,
-                    original_tags=batch.original_tags,
+                    field_ids=field_ids,
+                    entity_ids=entity_ids,
+                    time_ids=time_ids,
+                    token_type_ids=token_type_ids,
+                    edge_ids=edge_ids,
+                    role_ids=role_ids,
                     return_attention_weights=False,
                 )
 

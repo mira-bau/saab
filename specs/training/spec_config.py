@@ -41,26 +41,22 @@ def spec_preprocessing_config_device_with_other_fields():
         device="auto",
         vocab_size=5000,
         max_seq_len=256,
-        preserve_original_tags=True,
     )
 
     # Assert
     assert config.device == "auto"
     assert config.vocab_size == 5000
     assert config.max_seq_len == 256
-    assert config.preserve_original_tags is True
 
     # Test device doesn't interfere with other config fields
     config2 = PreprocessingConfig(
         device="cpu",
         vocab_size=10000,
         max_seq_len=512,
-        preserve_original_tags=False,
     )
     assert config2.device == "cpu"
     assert config2.vocab_size == 10000
     assert config2.max_seq_len == 512
-    assert config2.preserve_original_tags is False
 
     # Test config serialization includes device field
     config_dict = config.model_dump()

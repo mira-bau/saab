@@ -17,9 +17,6 @@ class PreprocessingConfig(BaseConfig):
     vocab_size: int = 30000
     max_seq_len: int = 512
     extractor_type: str | None = None  # "table", "json", "graph", or None (auto-detect)
-    preserve_original_tags: bool = (
-        False  # True for SAAB (preserve StructureTag objects)
-    )
     extractor_schema: dict | None = None  # Optional schema for extractors
     # device inherited from BaseConfig
     data_dir: Path | None = None  # Override default data/ directory (optional)

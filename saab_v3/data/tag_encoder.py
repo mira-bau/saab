@@ -66,13 +66,13 @@ class TagEncoder:
         self._is_built = True
 
     def encode(self, tag: StructureTag) -> EncodedTag:
-        """Encode tag efficiently, preserving original for SAAB.
+        """Encode tag efficiently.
 
         Args:
             tag: StructureTag to encode
 
         Returns:
-            EncodedTag with indices and original tag
+            EncodedTag with indices
 
         Raises:
             ValueError: If vocabularies not built
@@ -111,7 +111,6 @@ class TagEncoder:
                 if tag.token_type
                 else self.tag_vocabs["token_type"].encode(NONE_TOKEN)
             ),
-            original_tag=tag,  # Preserve for SAAB bias computation
         )
 
     def encode_sequence(

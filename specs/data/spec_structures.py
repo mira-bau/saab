@@ -186,10 +186,8 @@ def spec_tokenized_sequence_model_dump(sample_tokens):
 
 
 def spec_encoded_tag_creation_full(sample_structure_tag):
-    """Verify EncodedTag can be created with all indices and original_tag."""
+    """Verify EncodedTag can be created with all indices."""
     # Arrange
-    original_tag = sample_structure_tag
-
     # Act
     encoded = EncodedTag(
         field_idx=0,
@@ -198,7 +196,6 @@ def spec_encoded_tag_creation_full(sample_structure_tag):
         edge_idx=3,
         role_idx=4,
         token_type_idx=5,
-        original_tag=original_tag,
     )
 
     # Assert
@@ -208,14 +205,11 @@ def spec_encoded_tag_creation_full(sample_structure_tag):
     assert encoded.edge_idx == 3
     assert encoded.role_idx == 4
     assert encoded.token_type_idx == 5
-    assert encoded.original_tag.field == "name"
 
 
 def spec_encoded_tag_creation_partial(sample_structure_tag):
     """Verify EncodedTag can be created with partial indices (some None)."""
     # Arrange
-    original_tag = sample_structure_tag
-
     # Act
     encoded = EncodedTag(
         field_idx=0,
@@ -224,14 +218,12 @@ def spec_encoded_tag_creation_partial(sample_structure_tag):
         edge_idx=None,
         role_idx=None,
         token_type_idx=1,
-        original_tag=original_tag,
     )
 
     # Assert
     assert encoded.field_idx == 0
     assert encoded.entity_idx is None
     assert encoded.token_type_idx == 1
-    assert encoded.original_tag.field == "name"
 
 
 def spec_encoded_tag_get_indices(sample_structure_tag):
@@ -244,7 +236,6 @@ def spec_encoded_tag_get_indices(sample_structure_tag):
         edge_idx=2,
         role_idx=None,
         token_type_idx=3,
-        original_tag=sample_structure_tag,
     )
 
     # Act
@@ -263,7 +254,7 @@ def spec_encoded_tag_get_indices(sample_structure_tag):
 def spec_encoded_tag_model_dump(sample_structure_tag):
     """Verify EncodedTag model_dump() serialization works."""
     # Arrange
-    encoded = EncodedTag(field_idx=0, original_tag=sample_structure_tag)
+    encoded = EncodedTag(field_idx=0)
 
     # Act
     dumped = encoded.model_dump()
@@ -271,7 +262,6 @@ def spec_encoded_tag_model_dump(sample_structure_tag):
     # Assert
     assert isinstance(dumped, dict)
     assert dumped["field_idx"] == 0
-    assert "original_tag" in dumped
 
 
 # ============================================================================

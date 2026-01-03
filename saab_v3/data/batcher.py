@@ -3,8 +3,8 @@
 import torch
 from typing import Any
 
-from saab_v3.data.constants import PAD_IDX, PAD_TAG_FIELD
-from saab_v3.data.structures import Batch, EncodedTag, StructureTag, TokenizedSequence
+from saab_v3.data.constants import PAD_IDX
+from saab_v3.data.structures import Batch, EncodedTag, TokenizedSequence
 
 
 class Batcher:
@@ -30,13 +30,11 @@ class Batcher:
     def batch(
         self,
         sequences: list[tuple[TokenizedSequence, list[int], list[EncodedTag]]],
-        preserve_original_tags: bool = False,
     ) -> Batch:
         """Create batch from encoded sequences.
 
         Args:
             sequences: List of (TokenizedSequence, token_ids, encoded_tags) tuples
-            preserve_original_tags: If True, preserve original StructureTag objects for SAAB bias computation
 
         Returns:
             Batch object with all tensors
@@ -47,44 +45,23 @@ class Batcher:
         if not sequences:
             raise ValueError("Cannot create batch from empty sequences list")
 
-        # 1. Extract original tags if needed (before truncation)
-        original_tags_list = None
-        if preserve_original_tags:
-            original_tags_list = [
-                [tag.original_tag for tag in encoded_tags]
-                for _, _, encoded_tags in sequences
-            ]
-
-        # 2. Truncate sequences if needed
+        # 1. Truncate sequences if needed
         truncated = [
             self._truncate_sequence(seq, token_ids, encoded_tags)
             for seq, token_ids, encoded_tags in sequences
         ]
 
-        # 3. Truncate original tags if needed
-        if preserve_original_tags and original_tags_list:
-            truncated_original_tags = []
-            for i, (_, token_ids, _) in enumerate(truncated):
-                if len(original_tags_list[i]) > self.max_seq_len:
-                    truncated_original_tags.append(
-                        original_tags_list[i][: self.max_seq_len]
-                    )
-                else:
-                    truncated_original_tags.append(original_tags_list[i])
-            original_tags_list = truncated_original_tags
-
-        # 4. Find max length in batch
+        # 2. Find max length in batch
         max_len = max(len(token_ids) for _, token_ids, _ in truncated)
         max_len = min(max_len, self.max_seq_len)  # Don't exceed max_seq_len
 
-        # 5. Pad all sequences to max length
+        # 3. Pad all sequences to max length
         padded_token_ids = []
         padded_encoded_tags = []
-        padded_original_tags = []
         sequence_lengths = []
         sequence_ids = []
 
-        for i, (seq, token_ids, encoded_tags) in enumerate(truncated):
+        for seq, token_ids, encoded_tags in truncated:
             seq_len = len(token_ids)
             sequence_lengths.append(seq_len)
             sequence_ids.append(seq.sequence_id)
@@ -97,19 +74,13 @@ class Batcher:
             # Pad encoded tags
             padded_encoded_tags.append(self._pad_encoded_tags(encoded_tags, max_len))
 
-            # Pad original tags if needed
-            if preserve_original_tags and original_tags_list:
-                padded_original_tags.append(
-                    self._pad_original_tags(original_tags_list[i], max_len)
-                )
-
-        # 6. Extract tag indices
+        # 4. Extract tag indices
         tag_indices = self._extract_tag_indices(padded_encoded_tags)
 
-        # 7. Create attention masks
+        # 5. Create attention masks
         attention_masks = self._create_attention_masks(sequence_lengths, max_len)
 
-        # 8. Convert to tensors
+        # 6. Convert to tensors
         tensors = self._to_tensors(
             padded_token_ids,
             attention_masks,
@@ -117,7 +88,7 @@ class Batcher:
             self.device,
         )
 
-        # 9. Create Batch object
+        # 7. Create Batch object
         return Batch(
             token_ids=tensors["token_ids"],
             attention_mask=tensors["attention_mask"],
@@ -129,7 +100,6 @@ class Batcher:
             token_type_ids=tensors["token_type_ids"],
             sequence_lengths=sequence_lengths,
             sequence_ids=sequence_ids if any(sequence_ids) else None,
-            original_tags=padded_original_tags if preserve_original_tags else None,
         )
 
     def _truncate_sequence(
@@ -193,7 +163,6 @@ class Batcher:
             return encoded_tags[:target_len]
 
         # Create padding EncodedTag with PAD indices for all tag types
-        pad_tag = StructureTag(field="[PAD]")
         pad_encoded_tag = EncodedTag(
             field_idx=PAD_IDX,
             entity_idx=PAD_IDX,
@@ -201,30 +170,9 @@ class Batcher:
             edge_idx=PAD_IDX,
             role_idx=PAD_IDX,
             token_type_idx=PAD_IDX,
-            original_tag=pad_tag,
         )
 
         return encoded_tags + [pad_encoded_tag] * (target_len - len(encoded_tags))
-
-    def _pad_original_tags(
-        self, original_tags: list[StructureTag], target_len: int
-    ) -> list[StructureTag]:
-        """Pad original tags to target length using PAD tag.
-
-        Args:
-            original_tags: List of StructureTag objects
-            target_len: Target length
-
-        Returns:
-            Padded list of StructureTag objects
-        """
-        if len(original_tags) >= target_len:
-            return original_tags[:target_len]
-
-        # Create padding StructureTag with PAD_TAG_FIELD
-        pad_tag = StructureTag(field=PAD_TAG_FIELD)
-
-        return original_tags + [pad_tag] * (target_len - len(original_tags))
 
     def _extract_tag_indices(
         self, padded_encoded_tags: list[list[EncodedTag]]

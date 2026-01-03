@@ -3,7 +3,6 @@
 import torch
 import torch.nn as nn
 
-from saab_v3.data.structures import StructureTag
 from saab_v3.models.components.saab_attention import SAABAttention
 from saab_v3.models.components.ffn import FeedForward
 from saab_v3.models.components.normalization import LayerNorm
@@ -63,7 +62,12 @@ class SAABEncoderLayer(nn.Module):
         self,
         x: torch.Tensor,
         attention_mask: torch.Tensor | None = None,
-        original_tags: list[list[StructureTag]] | None = None,
+        field_ids: torch.Tensor | None = None,
+        entity_ids: torch.Tensor | None = None,
+        time_ids: torch.Tensor | None = None,
+        token_type_ids: torch.Tensor | None = None,
+        edge_ids: torch.Tensor | None = None,
+        role_ids: torch.Tensor | None = None,
         return_attention_weights: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Apply SAAB Transformer encoder layer.
@@ -72,8 +76,12 @@ class SAABEncoderLayer(nn.Module):
             x: Input tensor of shape [batch_size, seq_len, d_model]
             attention_mask: Optional attention mask of shape [batch_size, seq_len]
                 where 1 = valid token, 0 = padding (masked)
-            original_tags: List of lists of StructureTag objects for SAAB bias.
-                Required if lambda_bias != 0. Shape: [batch_size, seq_len]
+            field_ids: Field indices tensor of shape [batch_size, seq_len]
+            entity_ids: Entity indices tensor of shape [batch_size, seq_len]
+            time_ids: Time indices tensor of shape [batch_size, seq_len]
+            token_type_ids: Token type indices tensor of shape [batch_size, seq_len]
+            edge_ids: Optional edge indices tensor of shape [batch_size, seq_len]
+            role_ids: Optional role indices tensor of shape [batch_size, seq_len]
             return_attention_weights: Whether to return attention weights
 
         Returns:
@@ -90,7 +98,12 @@ class SAABEncoderLayer(nn.Module):
             key=norm_x,
             value=norm_x,
             attention_mask=attention_mask,
-            original_tags=original_tags,
+            field_ids=field_ids,
+            entity_ids=entity_ids,
+            time_ids=time_ids,
+            token_type_ids=token_type_ids,
+            edge_ids=edge_ids,
+            role_ids=role_ids,
             return_attention_weights=return_attention_weights,
         )
 

@@ -3,8 +3,7 @@
 import torch
 import torch.nn as nn
 
-from saab_v3.data.structures import StructureTag
-from saab_v3.data.saab_utils import compute_structural_relationship, is_pad_tag
+from saab_v3.data.constants import PAD_IDX
 from saab_v3.models.components.dropout import Dropout
 
 
@@ -67,67 +66,81 @@ class SAABAttention(nn.Module):
 
     def compute_bias_matrix(
         self,
-        original_tags: list[list[StructureTag]],
+        field_ids: torch.Tensor,
+        entity_ids: torch.Tensor,
+        time_ids: torch.Tensor,
+        token_type_ids: torch.Tensor,
+        edge_ids: torch.Tensor | None = None,
+        role_ids: torch.Tensor | None = None,
         attention_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Compute structural bias matrix B_struct from original tags.
+        """Compute structural bias matrix B_struct from tag index tensors.
+
+        Uses vectorized PyTorch operations for efficient computation on GPU.
 
         Args:
-            original_tags: List of lists of StructureTag objects,
-                shape [batch_size, seq_len]
+            field_ids: Field indices tensor of shape [batch_size, seq_len]
+            entity_ids: Entity indices tensor of shape [batch_size, seq_len]
+            time_ids: Time indices tensor of shape [batch_size, seq_len]
+            token_type_ids: Token type indices tensor of shape [batch_size, seq_len]
+            edge_ids: Optional edge indices tensor of shape [batch_size, seq_len]
+            role_ids: Optional role indices tensor of shape [batch_size, seq_len]
             attention_mask: Optional attention mask of shape [batch_size, seq_len]
                 where 1 = valid token, 0 = padding (masked)
 
         Returns:
             Bias matrix of shape [batch_size, seq_len, seq_len]
         """
-        batch_size = len(original_tags)
-        if batch_size == 0:
-            raise ValueError("original_tags cannot be empty")
+        batch_size, seq_len = field_ids.shape
+        device = field_ids.device
 
-        seq_len = len(original_tags[0])
-        device = self.lambda_bias.device
+        # Detect padding positions (PAD_IDX = 0)
+        is_pad = field_ids == PAD_IDX  # [batch_size, seq_len]
+        pad_mask = is_pad.unsqueeze(2) | is_pad.unsqueeze(1)  # [batch_size, seq_len, seq_len]
+
+        # Vectorized comparisons using broadcasting
+        # unsqueeze(2): [batch_size, seq_len, 1]
+        # unsqueeze(1): [batch_size, 1, seq_len]
+        # Result: [batch_size, seq_len, seq_len] via broadcasting
+
+        # Same field: field_ids[i] == field_ids[j]
+        same_field = field_ids.unsqueeze(2) == field_ids.unsqueeze(1)  # [batch_size, seq_len, seq_len]
+
+        # Same entity: entity_ids[i] == entity_ids[j]
+        same_entity = entity_ids.unsqueeze(2) == entity_ids.unsqueeze(1)  # [batch_size, seq_len, seq_len]
+
+        # Same time: time_ids[i] == time_ids[j]
+        same_time = time_ids.unsqueeze(2) == time_ids.unsqueeze(1)  # [batch_size, seq_len, seq_len]
+
+        # Same token_type: token_type_ids[i] == token_type_ids[j]
+        same_token_type = token_type_ids.unsqueeze(2) == token_type_ids.unsqueeze(1)  # [batch_size, seq_len, seq_len]
 
         # Initialize bias matrix
         bias_matrix = torch.zeros(
             (batch_size, seq_len, seq_len), dtype=torch.float32, device=device
         )
 
-        # Compute bias for each sequence
-        for batch_idx, tags in enumerate(original_tags):
-            for i in range(seq_len):
-                for j in range(seq_len):
-                    tag_i = tags[i]
-                    tag_j = tags[j]
+        # Combine relationships into bias matrix
+        # Convert boolean tensors to float and apply weights
+        bias_matrix = bias_matrix + (same_field.float() * 1.0)
+        bias_matrix = bias_matrix + (same_entity.float() * 1.0)
+        bias_matrix = bias_matrix + (same_time.float() * 0.5)
+        bias_matrix = bias_matrix + (same_token_type.float() * 0.3)
 
-                    # Skip padding tags
-                    if is_pad_tag(tag_i) or is_pad_tag(tag_j):
-                        bias_matrix[batch_idx, i, j] = float("-inf")
-                        continue
+        # Optional: has_edge (either token has non-PAD edge)
+        if edge_ids is not None:
+            has_edge = (edge_ids.unsqueeze(2) != PAD_IDX) | (edge_ids.unsqueeze(1) != PAD_IDX)
+            bias_matrix = bias_matrix + (has_edge.float() * 1.5)
 
-                    # Compute structural relationship
-                    relationship = compute_structural_relationship(tag_i, tag_j)
+        # Optional: same_role
+        if role_ids is not None:
+            same_role = role_ids.unsqueeze(2) == role_ids.unsqueeze(1)
+            bias_matrix = bias_matrix + (same_role.float() * 0.5)
 
-                    # Convert relationship to scalar bias
-                    # This is an implementation choice - can be adjusted
-                    bias = 0.0
-                    if relationship["same_field"]:
-                        bias += 1.0
-                    if relationship["same_entity"]:
-                        bias += 1.0
-                    if relationship["same_time"]:
-                        bias += 0.5
-                    if relationship["has_edge"]:
-                        bias += 1.5
-                    if relationship["same_role"]:
-                        bias += 0.5
-                    if relationship["same_token_type"]:
-                        bias += 0.3
-
-                    bias_matrix[batch_idx, i, j] = bias
+        # Set padding positions to -inf
+        bias_matrix = bias_matrix.masked_fill(pad_mask, float("-inf"))
 
         # Normalize bias to avoid dominating QK^T scores
-        # Scale by normalization factor (typically 1/sqrt(seq_len) or similar)
         if self.bias_normalization != 1.0:
             bias_matrix = bias_matrix * self.bias_normalization
 
@@ -149,7 +162,12 @@ class SAABAttention(nn.Module):
         key: torch.Tensor,
         value: torch.Tensor,
         attention_mask: torch.Tensor | None = None,
-        original_tags: list[list[StructureTag]] | None = None,
+        field_ids: torch.Tensor | None = None,
+        entity_ids: torch.Tensor | None = None,
+        time_ids: torch.Tensor | None = None,
+        token_type_ids: torch.Tensor | None = None,
+        edge_ids: torch.Tensor | None = None,
+        role_ids: torch.Tensor | None = None,
         return_attention_weights: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
         """Apply SAAB attention with structural bias.
@@ -160,8 +178,12 @@ class SAABAttention(nn.Module):
             value: Value tensor of shape [batch_size, seq_len, d_model]
             attention_mask: Optional attention mask of shape [batch_size, seq_len]
                 where 1 = valid token, 0 = padding (masked)
-            original_tags: List of lists of StructureTag objects for bias computation.
-                Required if lambda_bias != 0. Shape: [batch_size, seq_len]
+            field_ids: Field indices tensor of shape [batch_size, seq_len]
+            entity_ids: Entity indices tensor of shape [batch_size, seq_len]
+            time_ids: Time indices tensor of shape [batch_size, seq_len]
+            token_type_ids: Token type indices tensor of shape [batch_size, seq_len]
+            edge_ids: Optional edge indices tensor of shape [batch_size, seq_len]
+            role_ids: Optional role indices tensor of shape [batch_size, seq_len]
             return_attention_weights: Whether to return attention weights
 
         Returns:
@@ -170,6 +192,9 @@ class SAABAttention(nn.Module):
             If return_attention_weights=True:
                 Tuple of (output tensor, attention weights)
                 Attention weights shape: [batch_size, num_heads, seq_len, seq_len]
+
+        Raises:
+            ValueError: If required tag indices are None when lambda_bias != 0
         """
         batch_size, seq_len, _ = query.shape
 
@@ -187,16 +212,42 @@ class SAABAttention(nn.Module):
         scores = torch.matmul(Q, K.transpose(-2, -1)) * self.scale
         # scores shape: [batch_size, num_heads, seq_len, seq_len]
 
-        # Apply structural bias if lambda != 0 and original_tags provided
+        # Apply structural bias if lambda != 0 and tag indices provided
         # When lambda=0, skip bias computation for efficiency (bitwise equivalent to standard attention)
         if self.lambda_bias.item() != 0.0:
-            if original_tags is None:
+            # Validate required tag indices
+            if (
+                field_ids is None
+                or entity_ids is None
+                or time_ids is None
+                or token_type_ids is None
+            ):
                 raise ValueError(
-                    "original_tags is required when lambda_bias != 0 for SAAB attention"
+                    "Tag indices (field_ids, entity_ids, time_ids, token_type_ids) "
+                    "are required when lambda_bias != 0 for SAAB attention"
                 )
 
+            # Ensure all tensors are on the same device
+            device = query.device
+            field_ids = field_ids.to(device)
+            entity_ids = entity_ids.to(device)
+            time_ids = time_ids.to(device)
+            token_type_ids = token_type_ids.to(device)
+            if edge_ids is not None:
+                edge_ids = edge_ids.to(device)
+            if role_ids is not None:
+                role_ids = role_ids.to(device)
+
             # Compute bias matrix: [batch_size, seq_len, seq_len]
-            B_struct = self.compute_bias_matrix(original_tags, attention_mask)
+            B_struct = self.compute_bias_matrix(
+                field_ids=field_ids,
+                entity_ids=entity_ids,
+                time_ids=time_ids,
+                token_type_ids=token_type_ids,
+                edge_ids=edge_ids,
+                role_ids=role_ids,
+                attention_mask=attention_mask,
+            )
 
             # Expand bias to match scores shape: [batch_size, 1, seq_len, seq_len]
             B_struct = B_struct.unsqueeze(1)

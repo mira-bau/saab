@@ -16,7 +16,6 @@ def sample_config():
     return PreprocessingConfig(
         vocab_size=1000,
         max_seq_len=128,
-        preserve_original_tags=False,
     )
 
 

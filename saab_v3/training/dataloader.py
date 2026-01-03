@@ -14,7 +14,6 @@ def create_dataloader(
     dataset: StructuredDataset,
     batch_size: int,
     shuffle: bool = False,
-    preserve_original_tags: bool = False,
     num_workers: int = 0,
     pin_memory: bool = False,
 ) -> DataLoader:
@@ -24,7 +23,6 @@ def create_dataloader(
         dataset: StructuredDataset instance
         batch_size: Batch size
         shuffle: Shuffle data
-        preserve_original_tags: If True, preserve StructureTag objects for SAAB
         num_workers: Number of worker processes (0 = main process)
         pin_memory: Pin memory for faster GPU transfer
 
@@ -49,10 +47,7 @@ def create_dataloader(
         """Collate function that collects items and creates Batch."""
         # batch_items is a list of (TokenizedSequence, token_ids, encoded_tags) tuples
         # Pass directly to batcher (device is already set in batcher)
-        return batcher.batch(
-            batch_items,
-            preserve_original_tags=preserve_original_tags,
-        )
+        return batcher.batch(batch_items)
 
     # Create DataLoader
     return DataLoader(

@@ -77,28 +77,6 @@ def spec_dataloader_device_placement(fitted_preprocessor, sample_dataframe):
     assert batch.attention_mask.device.type == batch.token_ids.device.type
 
 
-def spec_dataloader_preserve_original_tags(fitted_preprocessor, sample_dataframe):
-    """Verify preserve_original_tags flag works."""
-    # Arrange
-    config = PreprocessingConfig(
-        vocab_size=1000,
-        max_seq_len=128,
-        preserve_original_tags=True,
-    )
-    preprocessor = Preprocessor(config)
-    preprocessor.fit(sample_dataframe)
-
-    dataset = StructuredDataset(sample_dataframe, preprocessor)
-    dataloader = create_dataloader(dataset, batch_size=2, preserve_original_tags=True)
-
-    # Act
-    batch = next(iter(dataloader))
-
-    # Assert
-    assert batch.original_tags is not None
-    assert len(batch.original_tags) == batch.token_ids.shape[0]
-
-
 def spec_dataloader_shuffle(fitted_preprocessor, sample_dataframe):
     """Verify shuffle parameter works."""
     # Arrange

@@ -46,10 +46,6 @@ def spec_tag_encoder_encode(sample_tokenized_sequences):
     assert encoded.field_idx is not None
     assert encoded.entity_idx is not None
     assert encoded.token_type_idx is not None
-    # Verify original tag preserved
-    assert encoded.original_tag.field == "name"
-    assert encoded.original_tag.entity == "user_1"
-    assert encoded.original_tag.token_type == "text"
 
 
 def spec_tag_encoder_encode_sequence(sample_tokenized_sequences):
@@ -71,7 +67,6 @@ def spec_tag_encoder_encode_sequence(sample_tokenized_sequences):
     # Verify all tags encoded
     for i, encoded_tag in enumerate(encoded_tags):
         assert encoded_tag.field_idx is not None
-        assert encoded_tag.original_tag.field == sequence.tokens[i].structure_tag.field
 
 
 def spec_tag_encoder_missing_tags(sample_tokenized_sequences):
@@ -89,9 +84,6 @@ def spec_tag_encoder_missing_tags(sample_tokenized_sequences):
     # Missing fields should use NONE token
     none_idx = encoder.tag_vocabs["entity"].encode(NONE_TOKEN)
     assert encoded.entity_idx == none_idx
-    # Verify original tag preserved
-    assert encoded.original_tag.field == "name"
-    assert encoded.original_tag.entity is None
 
 
 def spec_tag_encoder_oov_tags(sample_tokenized_sequences):
@@ -109,6 +101,3 @@ def spec_tag_encoder_oov_tags(sample_tokenized_sequences):
     # OOV tags should get UNK index
     unk_idx = encoder.tag_vocabs["field"].encode("[UNK]")
     assert encoded.field_idx == unk_idx
-    # Verify original tag preserved
-    assert encoded.original_tag.field == "unknown_field"
-    assert encoded.original_tag.entity == "unknown_entity"
