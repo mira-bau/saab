@@ -29,8 +29,9 @@ class Trainer:
         config: "TrainingConfig",
         train_loader: DataLoader,
         val_loader: DataLoader | None = None,
+        task_head: nn.Module | None = None,
         loss_fn: nn.Module | None = None,
-        task_head: nn.Module | None = None,  # For future task heads
+        task_type: str | None = None,
         experiment_name: str = "experiment",
     ):
         """Initialize trainer.
@@ -40,8 +41,9 @@ class Trainer:
             config: TrainingConfig instance
             train_loader: Training DataLoader
             val_loader: Optional validation DataLoader
-            loss_fn: Loss function (default: CrossEntropyLoss for classification)
-            task_head: Optional task head (for future use)
+            task_head: Optional task head
+            loss_fn: Loss function (optional: auto-created if task_type provided)
+            task_type: Task type for auto-creating loss function ("classification", "regression", etc.)
             experiment_name: Name of experiment (for checkpoint/logging directories)
         """
         self.model = model
@@ -49,6 +51,7 @@ class Trainer:
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.task_head = task_head
+        self.task_type = task_type
         self.experiment_name = experiment_name
 
         # Set random seeds for reproducibility
@@ -61,8 +64,25 @@ class Trainer:
             self.task_head = self.task_head.to(device)
 
         # Loss function
-        if loss_fn is None:
-            # Default to classification loss (will be replaced when task heads are added)
+        if loss_fn is None and task_type is not None:
+            # Auto-create loss function from task_type
+            from saab_v3.training.loss import create_loss_fn
+
+            # Extract task parameters from task_head if possible
+            loss_kwargs = {}
+            if task_head is not None:
+                if hasattr(task_head, "num_classes"):
+                    loss_kwargs["num_classes"] = task_head.num_classes
+                if hasattr(task_head, "multi_label"):
+                    loss_kwargs["multi_label"] = task_head.multi_label
+                if hasattr(task_head, "num_labels"):
+                    loss_kwargs["num_labels"] = task_head.num_labels
+                if hasattr(task_head, "num_targets"):
+                    loss_kwargs["num_targets"] = task_head.num_targets
+
+            self.loss_fn = create_loss_fn(task_type, **loss_kwargs)
+        elif loss_fn is None:
+            # Default to classification loss (for backward compatibility)
             self.loss_fn = nn.CrossEntropyLoss()
         else:
             self.loss_fn = loss_fn
@@ -270,9 +290,6 @@ class Trainer:
             outputs = self.task_head(outputs)
 
         # Compute loss
-        # NOTE: For now, this is a placeholder. When task heads are added,
-        # the loss computation will use actual labels from the batch.
-        # For now, we'll compute a dummy loss for testing purposes.
         loss = self._compute_loss(batch, outputs)
 
         # Backward pass (with gradient accumulation)
@@ -304,29 +321,136 @@ class Trainer:
     def _compute_loss(self, batch: Batch, outputs: torch.Tensor) -> torch.Tensor:
         """Compute loss for batch.
 
-        NOTE: This is a placeholder implementation. When task heads are added,
-        this will compute the actual loss using labels from the batch.
+        Args:
+            batch: Batch object (may contain labels)
+            outputs: Task head outputs (logits, predictions, etc.)
+
+        Returns:
+            Loss tensor
+
+        Raises:
+            ValueError: If labels are required but missing
+        """
+        if self.task_head is None:
+            # No task head: dummy loss (for backward compatibility)
+            return outputs.mean()
+
+        if batch.labels is None:
+            raise ValueError(
+                "Labels are required for supervised learning. "
+                "Batch must contain 'labels' field."
+            )
+
+        # Get task type
+        task_type = self._infer_task_type()
+
+        if task_type == "classification":
+            return self._compute_classification_loss(outputs, batch.labels)
+        elif task_type == "regression":
+            return self._compute_regression_loss(outputs, batch.labels)
+        elif task_type == "token_classification":
+            return self._compute_token_classification_loss(
+                outputs, batch.labels, batch.attention_mask
+            )
+        elif task_type == "ranking":
+            raise NotImplementedError(
+                "Ranking loss computation requires pairs (not yet implemented)"
+            )
+        else:
+            raise ValueError(f"Unknown task type: {task_type}")
+
+    def _infer_task_type(self) -> str:
+        """Infer task type from task_head or loss_fn.
+
+        Returns:
+            Task type string
+        """
+        if self.task_type is not None:
+            return self.task_type
+
+        # Try to infer from task_head class name
+        if self.task_head is not None:
+            class_name = self.task_head.__class__.__name__
+            if "Classification" in class_name:
+                return "classification"
+            elif "Regression" in class_name:
+                return "regression"
+            elif "TokenClassification" in class_name:
+                return "token_classification"
+            elif "Ranking" in class_name:
+                return "ranking"
+
+        # Try to infer from loss function type
+        if self.loss_fn is not None:
+            loss_class_name = self.loss_fn.__class__.__name__
+            if "CrossEntropy" in loss_class_name or "BCEWithLogits" in loss_class_name:
+                return "classification"
+            elif "MSELoss" in loss_class_name or "L1Loss" in loss_class_name:
+                return "regression"
+            elif "Ranking" in loss_class_name:
+                return "ranking"
+
+        # Default to classification
+        return "classification"
+
+    def _compute_classification_loss(
+        self, logits: torch.Tensor, labels: torch.Tensor
+    ) -> torch.Tensor:
+        """Compute classification loss.
 
         Args:
-            batch: Batch object
-            outputs: Model outputs
+            logits: Task head outputs [batch, num_classes] or [batch, num_classes] for multi-label
+            labels: Labels [batch] (class indices) or [batch, num_classes] (multi-label binary vectors)
 
         Returns:
             Loss tensor
         """
-        # For now, return a dummy loss for testing
-        # This will be replaced when task heads are implemented
-        # The actual loss will depend on the task type and labels in the batch
-        if self.task_head is None:
-            # Dummy loss: mean of output values (for testing only)
-            return outputs.mean()
-        else:
-            # When task heads are added, compute actual loss here
-            # For example: loss = self.loss_fn(outputs, batch.labels)
-            raise NotImplementedError(
-                "Loss computation with task heads not yet implemented. "
-                "This will be added when task heads are implemented."
-            )
+        return self.loss_fn(logits, labels)
+
+    def _compute_regression_loss(
+        self, predictions: torch.Tensor, labels: torch.Tensor
+    ) -> torch.Tensor:
+        """Compute regression loss.
+
+        Args:
+            predictions: Task head outputs [batch, num_targets]
+            labels: Labels [batch, num_targets] (continuous values)
+
+        Returns:
+            Loss tensor
+        """
+        return self.loss_fn(predictions, labels)
+
+    def _compute_token_classification_loss(
+        self,
+        logits: torch.Tensor,
+        labels: torch.Tensor,
+        attention_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute token classification loss.
+
+        Args:
+            logits: Task head outputs [batch, seq_len, num_labels]
+            labels: Labels [batch, seq_len] (label indices per token)
+            attention_mask: Attention mask [batch, seq_len] (1 = valid, 0 = pad)
+
+        Returns:
+            Loss tensor
+        """
+        # Reshape logits: [batch, seq_len, num_labels] -> [batch * seq_len, num_labels]
+        batch_size, seq_len, num_labels = logits.shape
+        logits_flat = logits.view(-1, num_labels)
+
+        # Reshape labels: [batch, seq_len] -> [batch * seq_len]
+        labels_flat = labels.view(-1)
+
+        # Mask padding positions (set to -100 for ignore_index in CrossEntropyLoss)
+        # Padding positions have attention_mask = 0
+        mask_flat = attention_mask.view(-1)
+        ignore_index = torch.tensor(-100, dtype=labels.dtype, device=labels.device)
+        labels_flat = torch.where(mask_flat == 1, labels_flat, ignore_index)
+
+        return self.loss_fn(logits_flat, labels_flat)
 
     def _validate(self) -> dict:
         """Run validation."""

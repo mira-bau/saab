@@ -166,6 +166,13 @@ class Batch(BaseModel):
     token_type_ids: torch.Tensor  # [batch_size, seq_len]
     sequence_lengths: list[int]  # Actual lengths (for unpacking)
     sequence_ids: list[str] | None = None  # For tracking/debugging
+    labels: torch.Tensor | None = None  # Task-specific labels (optional)
+    # Format depends on task type:
+    # - Classification (multi-class): [batch] (class indices)
+    # - Classification (multi-label): [batch, num_classes] (binary vectors)
+    # - Regression: [batch, num_targets] (continuous values)
+    # - Token Classification: [batch, seq_len] (label indices per token)
+    # - Ranking: Not stored in Batch (handled separately with pairs)
 
     @field_validator("attention_mask")
     @classmethod
@@ -232,6 +239,15 @@ class Batch(BaseModel):
                     f"sequence_ids length ({len(self.sequence_ids)}) must match batch_size ({batch_size})"
                 )
 
+        # Validate labels if provided
+        # Note: Shape validation is task-specific and can be deferred to Trainer
+        # Here we just check that batch_size matches if labels are present
+        if self.labels is not None:
+            if self.labels.shape[0] != batch_size:
+                raise ValueError(
+                    f"labels batch dimension ({self.labels.shape[0]}) must match batch_size ({batch_size})"
+                )
+
         return self
 
     @property
@@ -257,4 +273,5 @@ class Batch(BaseModel):
             token_type_ids=self.token_type_ids.to(device),
             sequence_lengths=self.sequence_lengths,
             sequence_ids=self.sequence_ids,
+            labels=self.labels.to(device) if self.labels is not None else None,
         )

@@ -221,3 +221,4 @@ __marimo__/
 saab_v3/dataset/*/*
 !saab_v3/dataset/*/.gitkeep
 logs/
+checkpoints/

@@ -369,3 +369,117 @@ def spec_batch_to_device_preserves_optional_tensors(sample_batch_tensors):
     assert moved_batch.role_ids is not None
     assert moved_batch.edge_ids.device == device
     assert moved_batch.role_ids.device == device
+
+
+def spec_batch_creation_with_labels_classification(sample_batch_tensors):
+    """Verify Batch can be created with classification labels."""
+    # Arrange
+    batch_size = 2
+    labels = torch.tensor([0, 1], dtype=torch.long)  # [batch] class indices
+
+    # Act
+    batch = Batch(**sample_batch_tensors, labels=labels)
+
+    # Assert
+    assert batch.labels is not None
+    assert batch.labels.shape == (batch_size,)
+    assert batch.labels.dtype == torch.long
+
+
+def spec_batch_creation_with_labels_multi_label(sample_batch_tensors):
+    """Verify Batch can be created with multi-label classification labels."""
+    # Arrange
+    batch_size, num_classes = 2, 3
+    labels = torch.tensor(
+        [[1, 0, 1], [0, 1, 0]], dtype=torch.float
+    )  # [batch, num_classes] binary vectors
+
+    # Act
+    batch = Batch(**sample_batch_tensors, labels=labels)
+
+    # Assert
+    assert batch.labels is not None
+    assert batch.labels.shape == (batch_size, num_classes)
+    assert batch.labels.dtype == torch.float
+
+
+def spec_batch_creation_with_labels_regression(sample_batch_tensors):
+    """Verify Batch can be created with regression labels."""
+    # Arrange
+    batch_size, num_targets = 2, 1
+    labels = torch.tensor([[3.5], [2.1]], dtype=torch.float)  # [batch, num_targets]
+
+    # Act
+    batch = Batch(**sample_batch_tensors, labels=labels)
+
+    # Assert
+    assert batch.labels is not None
+    assert batch.labels.shape == (batch_size, num_targets)
+    assert batch.labels.dtype == torch.float
+
+
+def spec_batch_creation_with_labels_token_classification(sample_batch_tensors):
+    """Verify Batch can be created with token classification labels."""
+    # Arrange
+    batch_size, seq_len = 2, 5
+    labels = torch.tensor(
+        [[0, 1, 2, 0, 0], [1, 1, 0, 0, 0]], dtype=torch.long
+    )  # [batch, seq_len]
+
+    # Act
+    batch = Batch(**sample_batch_tensors, labels=labels)
+
+    # Assert
+    assert batch.labels is not None
+    assert batch.labels.shape == (batch_size, seq_len)
+    assert batch.labels.dtype == torch.long
+
+
+def spec_batch_creation_without_labels(sample_batch_tensors):
+    """Verify Batch can be created without labels (None)."""
+    # Arrange & Act
+    batch = Batch(**sample_batch_tensors)
+
+    # Assert
+    assert batch.labels is None
+
+
+def spec_batch_labels_validation_batch_size_mismatch(sample_batch_tensors):
+    """Verify Batch validation fails if labels batch size doesn't match."""
+    # Arrange
+    batch_size = 2
+    labels = torch.tensor([0, 1, 2], dtype=torch.long)  # Wrong batch size (3 instead of 2)
+
+    # Act & Assert
+    import pytest
+
+    with pytest.raises(ValueError, match="labels batch dimension"):
+        Batch(**sample_batch_tensors, labels=labels)
+
+
+def spec_batch_to_device_with_labels(sample_batch_tensors):
+    """Verify to(device) moves labels tensor to device correctly."""
+    # Arrange
+    labels = torch.tensor([0, 1], dtype=torch.long)
+    batch = Batch(**sample_batch_tensors, labels=labels)
+    device = torch.device("cpu")
+
+    # Act
+    moved_batch = batch.to(device)
+
+    # Assert
+    assert moved_batch.labels is not None
+    assert moved_batch.labels.device == device
+
+
+def spec_batch_to_device_without_labels(sample_batch_tensors):
+    """Verify to(device) handles None labels correctly."""
+    # Arrange
+    batch = Batch(**sample_batch_tensors)  # labels=None by default
+    device = torch.device("cpu")
+
+    # Act
+    moved_batch = batch.to(device)
+
+    # Assert
+    assert moved_batch.labels is None

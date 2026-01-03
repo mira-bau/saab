@@ -45,7 +45,8 @@ def create_dataloader(
     # Create collate function
     def collate_fn(batch_items):
         """Collate function that collects items and creates Batch."""
-        # batch_items is a list of (TokenizedSequence, token_ids, encoded_tags) tuples
+        # batch_items is a list of (TokenizedSequence, token_ids, encoded_tags, label) tuples
+        # label can be None if not present in data
         # Pass directly to batcher (device is already set in batcher)
         return batcher.batch(batch_items)
 

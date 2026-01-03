@@ -268,3 +268,203 @@ def spec_trainer_random_seeds(fitted_preprocessor, sample_training_config, sampl
     assert trainer1.config.seed == 123
     assert trainer2.config.seed == 123
 
+
+def spec_trainer_loss_computation_classification(fitted_preprocessor, sample_training_config, sample_model_config):
+    """Verify Trainer computes classification loss correctly."""
+    # Arrange
+    from saab_v3.tasks import ClassificationHead
+    from saab_v3.training.loss import create_loss_fn
+
+    model = create_flat_transformer(fitted_preprocessor, sample_model_config)
+    task_head = ClassificationHead(d_model=128, num_classes=3, multi_label=False)
+    loss_fn = create_loss_fn("classification", num_classes=3, multi_label=False)
+
+    sample_data = pd.DataFrame({"name": ["Alice", "Bob"], "age": [25, 30]})
+    dataset = StructuredDataset(sample_data, fitted_preprocessor, split="train")
+    train_loader = create_dataloader(dataset, batch_size=2, shuffle=False)
+
+    trainer = Trainer(
+        model=model,
+        config=sample_training_config,
+        train_loader=train_loader,
+        task_head=task_head,
+        loss_fn=loss_fn,
+        task_type="classification",
+        experiment_name="test",
+    )
+
+    # Create a batch with labels
+    batch = next(iter(train_loader))
+    # Add classification labels (class indices)
+    batch.labels = torch.tensor([0, 1], dtype=torch.long)
+
+    # Act: Forward pass and loss computation
+    outputs = trainer.model(batch)
+    outputs = task_head(outputs)
+    loss = trainer._compute_loss(batch, outputs)
+
+    # Assert
+    assert loss is not None
+    assert isinstance(loss, torch.Tensor)
+    assert loss.item() > 0  # Loss should be positive
+    assert not torch.isnan(loss)
+    assert not torch.isinf(loss)
+
+
+def spec_trainer_loss_computation_regression(fitted_preprocessor, sample_training_config, sample_model_config):
+    """Verify Trainer computes regression loss correctly."""
+    # Arrange
+    from saab_v3.tasks import RegressionHead
+    from saab_v3.training.loss import create_loss_fn
+
+    model = create_flat_transformer(fitted_preprocessor, sample_model_config)
+    task_head = RegressionHead(d_model=128, num_targets=1)
+    loss_fn = create_loss_fn("regression")
+
+    sample_data = pd.DataFrame({"name": ["Alice", "Bob"], "age": [25, 30]})
+    dataset = StructuredDataset(sample_data, fitted_preprocessor, split="train")
+    train_loader = create_dataloader(dataset, batch_size=2, shuffle=False)
+
+    trainer = Trainer(
+        model=model,
+        config=sample_training_config,
+        train_loader=train_loader,
+        task_head=task_head,
+        loss_fn=loss_fn,
+        task_type="regression",
+        experiment_name="test",
+    )
+
+    # Create a batch with labels
+    batch = next(iter(train_loader))
+    # Add regression labels (continuous values)
+    batch.labels = torch.tensor([[3.5], [2.1]], dtype=torch.float)
+
+    # Act: Forward pass and loss computation
+    outputs = trainer.model(batch)
+    outputs = task_head(outputs)
+    loss = trainer._compute_loss(batch, outputs)
+
+    # Assert
+    assert loss is not None
+    assert isinstance(loss, torch.Tensor)
+    assert loss.item() >= 0  # Loss should be non-negative
+    assert not torch.isnan(loss)
+    assert not torch.isinf(loss)
+
+
+def spec_trainer_loss_computation_token_classification(fitted_preprocessor, sample_training_config, sample_model_config):
+    """Verify Trainer computes token classification loss correctly."""
+    # Arrange
+    from saab_v3.tasks import TokenClassificationHead
+    from saab_v3.training.loss import create_loss_fn
+
+    model = create_flat_transformer(fitted_preprocessor, sample_model_config)
+    task_head = TokenClassificationHead(d_model=128, num_labels=3)
+    loss_fn = create_loss_fn("token_classification", num_labels=3)
+
+    sample_data = pd.DataFrame({"name": ["Alice", "Bob"], "age": [25, 30]})
+    dataset = StructuredDataset(sample_data, fitted_preprocessor, split="train")
+    train_loader = create_dataloader(dataset, batch_size=2, shuffle=False)
+
+    trainer = Trainer(
+        model=model,
+        config=sample_training_config,
+        train_loader=train_loader,
+        task_head=task_head,
+        loss_fn=loss_fn,
+        task_type="token_classification",
+        experiment_name="test",
+    )
+
+    # Create a batch with labels
+    batch = next(iter(train_loader))
+    batch_size, seq_len = batch.token_ids.shape
+    # Add token classification labels (per-token label indices)
+    batch.labels = torch.randint(0, 3, (batch_size, seq_len), dtype=torch.long)
+
+    # Act: Forward pass and loss computation
+    outputs = trainer.model(batch)
+    outputs = task_head(outputs)
+    loss = trainer._compute_loss(batch, outputs)
+
+    # Assert
+    assert loss is not None
+    assert isinstance(loss, torch.Tensor)
+    assert loss.item() > 0  # Loss should be positive
+    assert not torch.isnan(loss)
+    assert not torch.isinf(loss)
+
+
+def spec_trainer_loss_computation_missing_labels(fitted_preprocessor, sample_training_config, sample_model_config):
+    """Verify Trainer raises error when labels are missing but required."""
+    # Arrange
+    from saab_v3.tasks import ClassificationHead
+    from saab_v3.training.loss import create_loss_fn
+
+    model = create_flat_transformer(fitted_preprocessor, sample_model_config)
+    task_head = ClassificationHead(d_model=128, num_classes=3, multi_label=False)
+    loss_fn = create_loss_fn("classification", num_classes=3, multi_label=False)
+
+    sample_data = pd.DataFrame({"name": ["Alice", "Bob"], "age": [25, 30]})
+    dataset = StructuredDataset(sample_data, fitted_preprocessor, split="train")
+    train_loader = create_dataloader(dataset, batch_size=2, shuffle=False)
+
+    trainer = Trainer(
+        model=model,
+        config=sample_training_config,
+        train_loader=train_loader,
+        task_head=task_head,
+        loss_fn=loss_fn,
+        task_type="classification",
+        experiment_name="test",
+    )
+
+    # Create a batch without labels
+    batch = next(iter(train_loader))
+    batch.labels = None
+
+    # Act: Forward pass and loss computation
+    outputs = trainer.model(batch)
+    outputs = task_head(outputs)
+
+    # Assert: Should raise ValueError
+    with pytest.raises(ValueError, match="Labels are required"):
+        trainer._compute_loss(batch, outputs)
+
+
+def spec_trainer_loss_computation_auto_create_loss(fitted_preprocessor, sample_training_config, sample_model_config):
+    """Verify Trainer auto-creates loss function from task_type."""
+    # Arrange
+    from saab_v3.tasks import ClassificationHead
+
+    model = create_flat_transformer(fitted_preprocessor, sample_model_config)
+    task_head = ClassificationHead(d_model=128, num_classes=3, multi_label=False)
+
+    sample_data = pd.DataFrame({"name": ["Alice", "Bob"], "age": [25, 30]})
+    dataset = StructuredDataset(sample_data, fitted_preprocessor, split="train")
+    train_loader = create_dataloader(dataset, batch_size=2, shuffle=False)
+
+    # Act: Create trainer with task_type but no loss_fn
+    trainer = Trainer(
+        model=model,
+        config=sample_training_config,
+        train_loader=train_loader,
+        task_head=task_head,
+        task_type="classification",
+        experiment_name="test",
+    )
+
+    # Assert: Loss function should be auto-created
+    assert trainer.loss_fn is not None
+    assert trainer.task_type == "classification"
+
+    # Verify it works
+    batch = next(iter(train_loader))
+    batch.labels = torch.tensor([0, 1], dtype=torch.long)
+    outputs = trainer.model(batch)
+    outputs = task_head(outputs)
+    loss = trainer._compute_loss(batch, outputs)
+    assert loss is not None
+    assert not torch.isnan(loss)
+

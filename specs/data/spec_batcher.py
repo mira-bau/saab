@@ -40,7 +40,7 @@ def spec_batcher_dynamic_padding(sample_encoded_sequences_different_lengths):
 
     # Assert
     # Find max length in original sequences
-    max_len = max(len(token_ids) for _, token_ids, _ in sequences)
+    max_len = max(len(token_ids) for _, token_ids, _, _ in sequences)
     # Verify batch is padded to max length
     assert batch.token_ids.shape[1] == max_len
     # Verify sequence lengths are preserved
@@ -161,13 +161,13 @@ def spec_batcher_sequence_metadata(sample_encoded_sequences):
     # Assert
     # Verify sequence_lengths are correct
     assert len(batch.sequence_lengths) == len(sequences)
-    for i, (_, token_ids, _) in enumerate(sequences):
+    for i, (_, token_ids, _, _) in enumerate(sequences):
         assert batch.sequence_lengths[i] == len(token_ids)
 
     # Verify sequence_ids are preserved
     assert batch.sequence_ids is not None
     assert len(batch.sequence_ids) == len(sequences)
-    for i, (seq, _, _) in enumerate(sequences):
+    for i, (seq, _, _, _) in enumerate(sequences):
         assert batch.sequence_ids[i] == seq.sequence_id
 
 
@@ -249,3 +249,168 @@ def spec_batcher_device_consistency(sample_encoded_sequences):
 
     # Verify device matches Batcher's stored device
     assert batch.token_ids.device == batcher.device
+
+
+# ============================================================================
+# Batcher Label Tests
+# ============================================================================
+
+
+def spec_batcher_labels_classification(sample_encoded_sequences):
+    """Verify Batcher batches classification labels correctly."""
+    # Arrange
+    batcher = Batcher(max_seq_len=512, device=torch.device("cpu"))
+    # Add labels to sequences (classification: class indices)
+    # Fixtures now return (seq, token_ids, encoded_tags, label) tuples
+    sequences_with_labels = [
+        (seq, token_ids, encoded_tags, label)
+        for (seq, token_ids, encoded_tags, _), label in zip(
+            sample_encoded_sequences, [0, 1]
+        )
+    ]
+
+    # Act
+    batch = batcher.batch(sequences_with_labels)
+
+    # Assert
+    assert batch.labels is not None
+    assert batch.labels.shape == (2,)  # [batch]
+    assert batch.labels.dtype == torch.long
+    assert torch.equal(batch.labels, torch.tensor([0, 1], dtype=torch.long))
+
+
+def spec_batcher_labels_multi_label(sample_encoded_sequences):
+    """Verify Batcher batches multi-label classification labels correctly."""
+    # Arrange
+    batcher = Batcher(max_seq_len=512, device=torch.device("cpu"))
+    # Add multi-label labels (binary vectors)
+    sequences_with_labels = [
+        (seq, token_ids, encoded_tags, label)
+        for (seq, token_ids, encoded_tags, _), label in zip(
+            sample_encoded_sequences, [[1, 0, 1], [0, 1, 0]]
+        )
+    ]
+
+    # Act
+    batch = batcher.batch(sequences_with_labels)
+
+    # Assert
+    assert batch.labels is not None
+    assert batch.labels.shape == (2, 3)  # [batch, num_classes]
+    assert batch.labels.dtype == torch.float
+    assert torch.equal(
+        batch.labels, torch.tensor([[1.0, 0.0, 1.0], [0.0, 1.0, 0.0]], dtype=torch.float)
+    )
+
+
+def spec_batcher_labels_regression(sample_encoded_sequences):
+    """Verify Batcher batches regression labels correctly."""
+    # Arrange
+    batcher = Batcher(max_seq_len=512, device=torch.device("cpu"))
+    # Add regression labels (continuous values)
+    sequences_with_labels = [
+        (seq, token_ids, encoded_tags, label)
+        for (seq, token_ids, encoded_tags, _), label in zip(
+            sample_encoded_sequences, [3.5, 2.1]
+        )
+    ]
+
+    # Act
+    batch = batcher.batch(sequences_with_labels)
+
+    # Assert
+    assert batch.labels is not None
+    # Regression labels should be [batch, 1] for single-target
+    assert batch.labels.shape == (2, 1)
+    assert batch.labels.dtype == torch.float
+    assert torch.allclose(batch.labels, torch.tensor([[3.5], [2.1]], dtype=torch.float))
+
+
+def spec_batcher_labels_token_classification(sample_encoded_sequences_different_lengths):
+    """Verify Batcher batches token classification labels correctly."""
+    # Arrange
+    batcher = Batcher(max_seq_len=512, device=torch.device("cpu"))
+    # Add token classification labels (per-token labels)
+    sequences_with_labels = [
+        (seq, token_ids, encoded_tags, label)
+        for (seq, token_ids, encoded_tags, _), label in zip(
+            sample_encoded_sequences_different_lengths,
+            [[0, 1], [1, 1, 0, 0]],  # Different lengths
+        )
+    ]
+
+    # Act
+    batch = batcher.batch(sequences_with_labels)
+
+    # Assert
+    assert batch.labels is not None
+    # Token classification labels should be padded to max_seq_len
+    max_len = batch.seq_len
+    assert batch.labels.shape == (2, max_len)
+    assert batch.labels.dtype == torch.long
+    # First sequence: [0, 1, -100, -100] (padded with -100)
+    # Second sequence: [1, 1, 0, 0]
+    assert batch.labels[0, 0] == 0
+    assert batch.labels[0, 1] == 1
+    assert batch.labels[0, 2] == -100  # Padding
+    assert batch.labels[1, 0] == 1
+    assert batch.labels[1, 1] == 1
+
+
+def spec_batcher_labels_none(sample_encoded_sequences):
+    """Verify Batcher handles None labels correctly."""
+    # Arrange
+    batcher = Batcher(max_seq_len=512, device=torch.device("cpu"))
+    # Add None labels (fixtures already have None, but we can explicitly set them)
+    sequences_with_none_labels = [
+        (seq, token_ids, encoded_tags, None)
+        for seq, token_ids, encoded_tags, _ in sample_encoded_sequences
+    ]
+
+    # Act
+    batch = batcher.batch(sequences_with_none_labels)
+
+    # Assert
+    assert batch.labels is None
+
+
+def spec_batcher_labels_mixed_none(sample_encoded_sequences):
+    """Verify Batcher handles mixed None and valid labels correctly."""
+    # Arrange
+    batcher = Batcher(max_seq_len=512, device=torch.device("cpu"))
+    # Mix of None and valid labels
+    sequences_with_mixed_labels = [
+        (sample_encoded_sequences[0][0], sample_encoded_sequences[0][1], sample_encoded_sequences[0][2], 0),
+        (sample_encoded_sequences[1][0], sample_encoded_sequences[1][1], sample_encoded_sequences[1][2], None),
+    ]
+
+    # Act
+    batch = batcher.batch(sequences_with_mixed_labels)
+
+    # Assert
+    # If any label is None, labels should be None (or handled gracefully)
+    # For now, we expect labels to be None if all are None, otherwise batched
+    # This depends on implementation - let's check if it handles it
+    # The current implementation should batch valid labels and use 0 for None
+    assert batch.labels is not None
+    assert batch.labels.shape == (2,)
+
+
+def spec_batcher_labels_device(sample_encoded_sequences):
+    """Verify labels are placed on correct device."""
+    # Arrange
+    cpu_device = torch.device("cpu")
+    batcher = Batcher(max_seq_len=512, device=cpu_device)
+    sequences_with_labels = [
+        (seq, token_ids, encoded_tags, label)
+        for (seq, token_ids, encoded_tags, _), label in zip(
+            sample_encoded_sequences, [0, 1]
+        )
+    ]
+
+    # Act
+    batch = batcher.batch(sequences_with_labels)
+
+    # Assert
+    assert batch.labels is not None
+    assert batch.labels.device == cpu_device

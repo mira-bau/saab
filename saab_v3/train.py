@@ -2,19 +2,55 @@
 Training entrypoint script for Transformer models.
 
 Usage:
-    poetry run python -m saab_v3.train --dataset-name <dataset_name> --model-type <model_type>
+    poetry run python -m saab_v3.train --dataset-name <dataset_name> --model-type <model_type> [--task-config <path>]
 
-Example:
+Required Arguments:
+    --dataset-name, --dataset: Name of the dataset directory in dataset/raw/
+    --model-type, --model: Model type ('flat', 'scratch', or 'saab')
+
+Optional Arguments:
+    --task-config: Path to task configuration YAML file (for supervised learning)
+    --resume: Path to checkpoint to resume training from
+    --experiment-name: Name of experiment (default: {dataset_name}_{model_type})
+
+Examples:
+    # Basic training without task head (unsupervised/pretraining)
     poetry run python -m saab_v3.train --dataset-name mydataset --model-type saab
 
-The dataset must be located in dataset/raw/{dataset_name}/ directory
-and should contain train.csv and val.csv files.
+    # Training with task head (supervised learning)
+    poetry run python -m saab_v3.train \\
+        --dataset-name mydataset \\
+        --model-type saab \\
+        --task-config experiments/configs/examples/binary_classification.yaml
 
-Data locations:
-- Raw data: dataset/raw/{dataset_name}/
-- Artifacts: dataset/artifacts/{dataset_name}/
-- Checkpoints: checkpoints/{experiment_name}/
-- Logs: logs/{experiment_name}/
+    # Resume training from checkpoint
+    poetry run python -m saab_v3.train \\
+        --dataset-name mydataset \\
+        --model-type saab \\
+        --task-config experiments/configs/examples/binary_classification.yaml \\
+        --resume checkpoints/mydataset_saab/checkpoint_epoch_5.pt
+
+Dataset Requirements:
+    The dataset must be located in dataset/raw/{dataset_name}/ directory
+    and should contain train.csv and val.csv files.
+
+    For supervised learning, CSV files should include a 'label' or 'target' column.
+    Supported label formats:
+    - Classification: integer class indices or binary vectors (multi-label)
+    - Regression: continuous float values
+    - Token Classification: JSON array of label indices per token
+
+Data Locations:
+    - Raw data: dataset/raw/{dataset_name}/
+    - Artifacts: dataset/artifacts/{dataset_name}/
+    - Checkpoints: checkpoints/{experiment_name}/
+    - Logs: logs/{experiment_name}/
+
+Task Configuration:
+    Task configs define the task head and loss function. See:
+    - experiments/configs/templates/ for template configs
+    - experiments/configs/examples/ for example configs
+    - experiments/configs/README.md for detailed documentation
 """
 
 import argparse
@@ -64,12 +100,19 @@ parser.add_argument(
     default=None,
     help="Experiment name (default: {dataset_name}_{model_type})",
 )
+parser.add_argument(
+    "--task-config",
+    type=str,
+    default=None,
+    help="Path to task configuration YAML file (optional)",
+)
 args = parser.parse_args()
 
 dataset_name = args.dataset_name
 model_type = args.model_type
 resume_checkpoint = args.resume
 experiment_name = args.experiment_name or f"{dataset_name}_{model_type}"
+task_config_path = args.task_config
 
 # ============================================================================
 # Configuration
@@ -195,6 +238,42 @@ print(f"  - num_layers: {model.num_layers}")
 print(f"  - num_heads: {model.num_heads}")
 
 # ============================================================================
+# Task Head and Loss Function
+# ============================================================================
+
+task_head = None
+loss_fn = None
+task_type = None
+
+if task_config_path:
+    import yaml
+
+    print(f"\nLoading task configuration from {task_config_path}...")
+    with open(task_config_path, "r") as f:
+        task_config = yaml.safe_load(f)
+
+    # Validate config
+    from saab_v3.tasks import validate_task_config, create_task_head_from_config
+
+    validate_task_config(task_config)
+    print("✓ Task configuration validated")
+
+    # Create task head
+    task_head = create_task_head_from_config(
+        task_config, d_model=model_config.d_model
+    )
+    print(f"✓ Task head created: {task_head.__class__.__name__}")
+
+    # Extract task type and create loss function
+    task_type = task_config["task"]["name"]
+    task_params = task_config["task"]["params"]
+
+    from saab_v3.training.loss import create_loss_fn
+
+    loss_fn = create_loss_fn(task_type, **task_params)
+    print(f"✓ Loss function created for task: {task_type}")  # noqa: F541
+
+# ============================================================================
 # Training
 # ============================================================================
 
@@ -204,6 +283,9 @@ trainer = Trainer(
     config=training_config,
     train_loader=train_loader,
     val_loader=val_loader,
+    task_head=task_head,
+    loss_fn=loss_fn,
+    task_type=task_type,
     experiment_name=experiment_name,
 )
 
@@ -220,7 +302,7 @@ print("=" * 60)
 print("\nTraining complete!")
 
 # Print summary
-print(f"\nTraining Summary:")
+print("\nTraining Summary:")
 print(f"  - Total epochs: {len(history['train_losses'])}")
 print(f"  - Final train loss: {history['train_losses'][-1]:.6f}")
 if history["val_losses"]:

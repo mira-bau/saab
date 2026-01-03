@@ -36,10 +36,10 @@ class StructuredDataset(Dataset):
         self.lazy = lazy
 
         # Load data
-        loaded_data = self._load_data(data)
+        self.raw_data = self._load_data(data)
 
         # Transform: extract and tokenize
-        sequences = self.preprocessor.transform(loaded_data)
+        sequences = self.preprocessor.transform(self.raw_data)
 
         # Encode: convert to token IDs and encoded tags
         self.encoded_sequences = self.preprocessor.encode(sequences)
@@ -138,13 +138,53 @@ class StructuredDataset(Dataset):
 
     def __getitem__(
         self, idx: int
-    ) -> tuple[TokenizedSequence, list[int], list[EncodedTag]]:
+    ) -> tuple[TokenizedSequence, list[int], list[EncodedTag], Any | None]:
         """Return encoded sequence ready for batching.
 
         Args:
             idx: Sequence index
 
         Returns:
-            (TokenizedSequence, token_ids, encoded_tags) tuple
+            (TokenizedSequence, token_ids, encoded_tags, label) tuple
+            label is None if not present in data
         """
-        return self.encoded_sequences[idx]
+        tokenized_seq, token_ids, encoded_tags = self.encoded_sequences[idx]
+        label = self._extract_label(idx)
+        return tokenized_seq, token_ids, encoded_tags, label
+
+    def _extract_label(self, idx: int) -> Any | None:
+        """Extract label from raw data for given index.
+
+        Args:
+            idx: Sequence index
+
+        Returns:
+            Label value (int, float, list, etc.) or None if not present
+        """
+        # Try to extract label from raw data
+        # Default field names: "label", "target", "y"
+        if isinstance(self.raw_data, pd.DataFrame):
+            # CSV/Excel: try common column names
+            for col_name in ["label", "target", "y"]:
+                if col_name in self.raw_data.columns:
+                    label_value = self.raw_data.iloc[idx][col_name]
+                    # Handle NaN
+                    if pd.isna(label_value):
+                        return None
+                    return label_value
+        elif isinstance(self.raw_data, list):
+            # List of dicts or objects
+            if idx < len(self.raw_data):
+                item = self.raw_data[idx]
+                if isinstance(item, dict):
+                    # Try common field names
+                    for field_name in ["label", "target", "y"]:
+                        if field_name in item:
+                            return item[field_name]
+        elif isinstance(self.raw_data, dict):
+            # Single dict: check if it has a labels list
+            if "labels" in self.raw_data and idx < len(self.raw_data["labels"]):
+                return self.raw_data["labels"][idx]
+
+        # No label found
+        return None

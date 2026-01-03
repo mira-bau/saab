@@ -231,7 +231,7 @@ def sample_encoded_sequences(sample_tokenized_sequences):
     for seq in sample_tokenized_sequences:
         seq_enc, token_ids = tokenizer.encode_sequence(seq)
         seq_final, encoded_tags = encoder.encode_sequence(seq_enc)
-        encoded.append((seq_final, token_ids, encoded_tags))
+        encoded.append((seq_final, token_ids, encoded_tags, None))  # Add None label
 
     return encoded
 
@@ -275,7 +275,7 @@ def sample_encoded_sequences_different_lengths():
     for seq in sequences:
         seq_enc, token_ids = tokenizer.encode_sequence(seq)
         seq_final, encoded_tags = encoder.encode_sequence(seq_enc)
-        encoded.append((seq_final, token_ids, encoded_tags))
+        encoded.append((seq_final, token_ids, encoded_tags, None))  # Add None label
 
     return encoded
 
@@ -321,6 +321,6 @@ def sample_encoded_sequences_with_edges_roles():
     for seq in sequences:
         seq_enc, token_ids = tokenizer.encode_sequence(seq)
         seq_final, encoded_tags = encoder.encode_sequence(seq_enc)
-        encoded.append((seq_final, token_ids, encoded_tags))
+        encoded.append((seq_final, token_ids, encoded_tags, None))  # Add None label
 
     return encoded

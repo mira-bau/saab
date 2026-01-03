@@ -29,15 +29,16 @@ class Batcher:
 
     def batch(
         self,
-        sequences: list[tuple[TokenizedSequence, list[int], list[EncodedTag]]],
+        sequences: list[tuple[TokenizedSequence, list[int], list[EncodedTag], Any | None]],
     ) -> Batch:
         """Create batch from encoded sequences.
 
         Args:
-            sequences: List of (TokenizedSequence, token_ids, encoded_tags) tuples
+            sequences: List of (TokenizedSequence, token_ids, encoded_tags, label) tuples
+                label can be None if not present
 
         Returns:
-            Batch object with all tensors
+            Batch object with all tensors and labels (if provided)
 
         Raises:
             ValueError: If sequences list is empty
@@ -45,17 +46,21 @@ class Batcher:
         if not sequences:
             raise ValueError("Cannot create batch from empty sequences list")
 
-        # 1. Truncate sequences if needed
+        # 1. Extract labels (if present)
+        labels = [label for _, _, _, label in sequences]
+        has_labels = any(label is not None for label in labels)
+
+        # 2. Truncate sequences if needed
         truncated = [
             self._truncate_sequence(seq, token_ids, encoded_tags)
-            for seq, token_ids, encoded_tags in sequences
+            for seq, token_ids, encoded_tags, _ in sequences
         ]
 
-        # 2. Find max length in batch
+        # 3. Find max length in batch
         max_len = max(len(token_ids) for _, token_ids, _ in truncated)
         max_len = min(max_len, self.max_seq_len)  # Don't exceed max_seq_len
 
-        # 3. Pad all sequences to max length
+        # 4. Pad all sequences to max length
         padded_token_ids = []
         padded_encoded_tags = []
         sequence_lengths = []
@@ -74,13 +79,13 @@ class Batcher:
             # Pad encoded tags
             padded_encoded_tags.append(self._pad_encoded_tags(encoded_tags, max_len))
 
-        # 4. Extract tag indices
+        # 5. Extract tag indices
         tag_indices = self._extract_tag_indices(padded_encoded_tags)
 
-        # 5. Create attention masks
+        # 6. Create attention masks
         attention_masks = self._create_attention_masks(sequence_lengths, max_len)
 
-        # 6. Convert to tensors
+        # 7. Convert to tensors
         tensors = self._to_tensors(
             padded_token_ids,
             attention_masks,
@@ -88,7 +93,12 @@ class Batcher:
             self.device,
         )
 
-        # 7. Create Batch object
+        # 8. Batch labels if present
+        labels_tensor = None
+        if has_labels:
+            labels_tensor = self._batch_labels(labels, max_len, self.device)
+
+        # 9. Create Batch object
         return Batch(
             token_ids=tensors["token_ids"],
             attention_mask=tensors["attention_mask"],
@@ -100,6 +110,7 @@ class Batcher:
             token_type_ids=tensors["token_type_ids"],
             sequence_lengths=sequence_lengths,
             sequence_ids=sequence_ids if any(sequence_ids) else None,
+            labels=labels_tensor,
         )
 
     def _truncate_sequence(
@@ -296,3 +307,137 @@ class Batcher:
             "role_ids": role_ids_tensor,
             "token_type_ids": token_type_ids_tensor,
         }
+
+    def _batch_labels(
+        self,
+        labels: list[Any | None],
+        max_seq_len: int,
+        device: torch.device,
+    ) -> torch.Tensor:
+        """Batch labels into tensor.
+
+        Args:
+            labels: List of label values (can be None, int, float, list, etc.)
+            max_seq_len: Maximum sequence length (for token classification padding)
+            device: Device to place tensor on
+
+        Returns:
+            Labels tensor (shape depends on label format)
+        """
+        # Filter out None labels
+        valid_labels = [label for label in labels if label is not None]
+        if not valid_labels:
+            return None
+
+        # Infer label format from first valid label
+        first_label = valid_labels[0]
+
+        # Check if labels are sequences (list/tuple)
+        if isinstance(first_label, (list, tuple)):
+            # Check if first element is numeric (multi-label binary vector or token classification)
+            if len(first_label) > 0 and isinstance(first_label[0], (int, float, bool)):
+                # Check if all labels have same length (multi-label) or variable length (token classification)
+                label_lengths = [
+                    len(list(label) if isinstance(label, tuple) else label)
+                    for label in valid_labels
+                    if label is not None
+                ]
+                
+                if len(set(label_lengths)) == 1:
+                    # All labels have same length: multi-label classification [batch, num_classes]
+                    num_classes = label_lengths[0]
+                    label_tensors = []
+                    for label in labels:
+                        if label is None:
+                            # Use zeros for missing labels
+                            label_tensors.append([0.0] * num_classes)
+                        else:
+                            label_list = list(label) if isinstance(label, tuple) else label
+                            label_tensors.append([float(x) for x in label_list])
+
+                    return torch.tensor(label_tensors, dtype=torch.float, device=device)
+                else:
+                    # Variable lengths: token classification [batch, seq_len]
+                    # Pad sequences to max_seq_len
+                    padded_labels = []
+                    for label in labels:
+                        if label is None:
+                            # Pad with -100 (ignore_index for CrossEntropyLoss)
+                            padded_labels.append([-100] * max_seq_len)
+                        else:
+                            label_list = list(label) if isinstance(label, tuple) else label
+                            # Truncate if too long
+                            if len(label_list) > max_seq_len:
+                                label_list = label_list[:max_seq_len]
+                            # Pad if too short
+                            padded = label_list + [-100] * (max_seq_len - len(label_list))
+                            padded_labels.append(padded)
+
+                    return torch.tensor(padded_labels, dtype=torch.long, device=device)
+            else:
+                # Empty list or non-numeric: treat as token classification with empty sequence
+                # This shouldn't happen in practice, but handle gracefully
+                padded_labels = []
+                for label in labels:
+                    if label is None:
+                        padded_labels.append([-100] * max_seq_len)
+                    else:
+                        label_list = list(label) if isinstance(label, tuple) else label
+                        if len(label_list) > max_seq_len:
+                            label_list = label_list[:max_seq_len]
+                        padded = label_list + [-100] * (max_seq_len - len(label_list))
+                        padded_labels.append(padded)
+
+                return torch.tensor(padded_labels, dtype=torch.long, device=device)
+
+        # Check if labels are numeric (classification or regression)
+        if isinstance(first_label, (int, float)):
+            # Check if all labels are integers (classification) or floats (regression)
+            all_int = all(
+                isinstance(label_val, int) or (isinstance(label_val, float) and label_val.is_integer())
+                for label_val in valid_labels
+            )
+
+            label_values = []
+            for label in labels:
+                if label is None:
+                    # Use 0 as placeholder (will be handled by loss function if needed)
+                    label_values.append(0)
+                else:
+                    label_values.append(label)
+
+            if all_int:
+                # Classification: [batch] (class indices)
+                return torch.tensor(label_values, dtype=torch.long, device=device)
+            else:
+                # Regression: [batch] or [batch, num_targets] if labels are lists
+                # Check if labels are lists of floats (multi-target regression)
+                if isinstance(first_label, (list, tuple)) and isinstance(
+                    first_label[0], float
+                ):
+                    # Multi-target regression: [batch, num_targets]
+                    num_targets = len(first_label)
+                    label_tensors = []
+                    for label in labels:
+                        if label is None:
+                            label_tensors.append([0.0] * num_targets)
+                        else:
+                            label_list = (
+                                list(label) if isinstance(label, tuple) else label
+                            )
+                            label_tensors.append([float(x) for x in label_list])
+                    return torch.tensor(label_tensors, dtype=torch.float, device=device)
+                else:
+                    # Single-target regression: [batch, 1]
+                    return torch.tensor(
+                        label_values, dtype=torch.float, device=device
+                    ).unsqueeze(-1)
+
+        # Fallback: try to convert to tensor
+        try:
+            return torch.tensor(labels, dtype=torch.float, device=device)
+        except (ValueError, TypeError):
+            raise ValueError(
+                f"Cannot batch labels of type {type(first_label)}. "
+                f"Supported types: int, float, list, tuple"
+            )
