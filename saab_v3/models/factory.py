@@ -39,13 +39,11 @@ def get_vocab_sizes(preprocessor: Preprocessor) -> dict[str, int]:
         raise ValueError("Preprocessor must be fitted before extracting vocab sizes")
 
     vocab_sizes = {
-        "token_vocab_size": preprocessor.tokenizer.vocab.size(),
-        "token_type_vocab_size": preprocessor.tag_encoder.tag_vocabs[
-            "token_type"
-        ].size(),
-        "field_vocab_size": preprocessor.tag_encoder.tag_vocabs["field"].size(),
-        "entity_vocab_size": preprocessor.tag_encoder.tag_vocabs["entity"].size(),
-        "time_vocab_size": preprocessor.tag_encoder.tag_vocabs["time"].size(),
+        "token_vocab_size": len(preprocessor.tokenizer.vocab),
+        "token_type_vocab_size": len(preprocessor.tag_encoder.tag_vocabs["token_type"]),
+        "field_vocab_size": len(preprocessor.tag_encoder.tag_vocabs["field"]),
+        "entity_vocab_size": len(preprocessor.tag_encoder.tag_vocabs["entity"]),
+        "time_vocab_size": len(preprocessor.tag_encoder.tag_vocabs["time"]),
     }
 
     return vocab_sizes
