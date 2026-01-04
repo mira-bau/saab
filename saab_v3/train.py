@@ -115,9 +115,30 @@ print("\nUsing Pydantic defaults for configuration...")
 
 # Simple constructor calls with values
 preprocessing_config = PreprocessingConfig()
-model_config = ModelConfig()
-training_config = TrainingConfig(num_epochs=1)
-task_config = ClassificationTaskConfig(num_classes=10, multi_label=False)
+model_config = ModelConfig(dropout=0.2)  # Increased for regularization
+training_config = TrainingConfig(
+    num_epochs=5,
+    learning_rate=1e-6,
+    batch_size=64,
+    lr_schedule="reduce_on_plateau",
+    max_grad_norm=0.1,
+    early_stop_zero_loss_steps=100,
+    early_stopping_patience=3,
+    early_stopping_min_delta=0.001,
+    early_stopping_metric="loss",
+    # ReduceLROnPlateau parameters
+    lr_mode="min",
+    lr_factor=0.5,
+    lr_patience=3,
+    lr_threshold=1e-4,
+    lr_min=1e-8,
+    lr_cooldown=0,
+)
+task_config = ClassificationTaskConfig(
+    num_classes=14,  # Hardcoded for mydataset (14 classes)
+    multi_label=False,
+    label_smoothing=0.1,  # Regularization
+)
 
 # Print configuration summary
 print(f"\n{'=' * 60}")
@@ -130,13 +151,21 @@ print("\nModel:")
 print(f"  - d_model: {model_config.d_model}")
 print(f"  - num_layers: {model_config.num_layers}")
 print(f"  - num_heads: {model_config.num_heads}")
+print(f"  - dropout: {model_config.dropout}")
 print(f"  - device: {model_config.device}")
 print("\nTraining:")
 print(f"  - learning_rate: {training_config.learning_rate}")
 print(f"  - batch_size: {training_config.batch_size}")
+print(f"  - num_epochs: {training_config.num_epochs}")
 print(f"  - lr_schedule: {training_config.lr_schedule}")
 print(f"  - max_grad_norm: {training_config.max_grad_norm}")
+print(f"  - early_stopping_patience: {training_config.early_stopping_patience}")
 print(f"  - device: {training_config.device}")
+if task_config is not None:
+    print("\nTask:")
+    print("  - task_type: classification")
+    print(f"  - num_classes: {task_config.num_classes}")
+    print(f"  - label_smoothing: {task_config.label_smoothing}")
 print("=" * 60)
 print()
 
