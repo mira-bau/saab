@@ -71,6 +71,18 @@ class ClassificationTaskConfig(BaseModel):
             raise ValueError(f"label_smoothing must be in [0, 1), got {v!r}")
         return float(v)
 
+    def get_loss_params(self) -> dict:
+        """Get loss function parameters, excluding task head parameters.
+
+        Returns:
+            Dictionary with loss-relevant parameters: num_classes, multi_label, label_smoothing
+        """
+        return {
+            "num_classes": self.num_classes,
+            "multi_label": self.multi_label,
+            "label_smoothing": self.label_smoothing,
+        }
+
 
 class RankingTaskConfig(BaseModel):
     """Configuration for ranking tasks."""
@@ -125,6 +137,15 @@ class RankingTaskConfig(BaseModel):
                 )
         return self
 
+    def get_loss_params(self) -> dict:
+        """Get loss function parameters, excluding task head parameters.
+
+        Returns:
+            Empty dictionary. Ranking task config's "method" is for task head, not loss.
+            Loss function uses defaults: method="hinge", margin=1.0, reduction="mean"
+        """
+        return {}  # Use loss function defaults
+
 
 class RegressionTaskConfig(BaseModel):
     """Configuration for regression tasks."""
@@ -175,6 +196,14 @@ class RegressionTaskConfig(BaseModel):
             raise ValueError(f"pooling must be one of {valid_pooling}, got {v!r}")
         return v
 
+    def get_loss_params(self) -> dict:
+        """Get loss function parameters, excluding task head parameters.
+
+        Returns:
+            Empty dictionary. Regression loss only accepts reduction (optional, defaults to "mean")
+        """
+        return {}  # Use loss function defaults
+
 
 class TokenClassificationTaskConfig(BaseModel):
     """Configuration for token classification tasks."""
@@ -184,6 +213,7 @@ class TokenClassificationTaskConfig(BaseModel):
     num_labels: int
     hidden_dims: Optional[list[int]] = None
     dropout: float = 0.1
+    label_smoothing: float = 0.0
 
     @field_validator("num_labels")
     @classmethod
@@ -215,6 +245,24 @@ class TokenClassificationTaskConfig(BaseModel):
         if not isinstance(v, (int, float)) or not (0 <= v < 1):
             raise ValueError(f"dropout must be in [0, 1), got {v!r}")
         return float(v)
+
+    @field_validator("label_smoothing")
+    @classmethod
+    def validate_label_smoothing(cls, v: float) -> float:
+        if not isinstance(v, (int, float)) or not (0 <= v < 1):
+            raise ValueError(f"label_smoothing must be in [0, 1), got {v!r}")
+        return float(v)
+
+    def get_loss_params(self) -> dict:
+        """Get loss function parameters, excluding task head parameters.
+
+        Returns:
+            Dictionary with loss-relevant parameters: num_labels, label_smoothing
+        """
+        return {
+            "num_labels": self.num_labels,
+            "label_smoothing": self.label_smoothing,
+        }
 
 
 # Union type for task configs

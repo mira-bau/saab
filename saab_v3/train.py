@@ -64,7 +64,9 @@ from saab_v3.training import (
     create_dataloader,
 )
 from saab_v3.training.trainer import Trainer
+from saab_v3.training.loss import create_loss_fn
 from saab_v3.tasks.config import ClassificationTaskConfig
+from saab_v3.tasks import create_task_head_from_config
 
 # ============================================================================
 # Command-Line Arguments
@@ -107,6 +109,8 @@ model_type = args.model_type
 resume_checkpoint = args.resume
 experiment_name = args.experiment_name or f"{dataset_name}_{model_type}"
 
+device = "mps"
+
 # ============================================================================
 # Configuration - Single Source of Truth: Pydantic Defaults
 # ============================================================================
@@ -114,9 +118,15 @@ experiment_name = args.experiment_name or f"{dataset_name}_{model_type}"
 print("\nUsing Pydantic defaults for configuration...")
 
 # Simple constructor calls with values
-preprocessing_config = PreprocessingConfig()
-model_config = ModelConfig(dropout=0.2)  # Increased for regularization
+preprocessing_config = PreprocessingConfig(
+    device=device,
+)
+model_config = ModelConfig(
+    device=device,
+    dropout=0.2,
+)  # Increased for regularization
 training_config = TrainingConfig(
+    device=device,
     num_epochs=5,
     learning_rate=1e-6,
     batch_size=64,
@@ -139,6 +149,7 @@ task_config = ClassificationTaskConfig(
     multi_label=False,
     label_smoothing=0.1,  # Regularization
 )
+task_type = "classification"  # ranking, regression, token_classification
 
 # Print configuration summary
 print(f"\n{'=' * 60}")
@@ -161,11 +172,6 @@ print(f"  - lr_schedule: {training_config.lr_schedule}")
 print(f"  - max_grad_norm: {training_config.max_grad_norm}")
 print(f"  - early_stopping_patience: {training_config.early_stopping_patience}")
 print(f"  - device: {training_config.device}")
-if task_config is not None:
-    print("\nTask:")
-    print("  - task_type: classification")
-    print(f"  - num_classes: {task_config.num_classes}")
-    print(f"  - label_smoothing: {task_config.label_smoothing}")
 print("=" * 60)
 print()
 
@@ -179,7 +185,7 @@ DATASET_DIR = Path(__file__).parent.parent / "dataset" / "raw" / dataset_name
 # File paths
 train_path = DATASET_DIR / "train.csv"
 val_path = DATASET_DIR / "val.csv"
-test_path = DATASET_DIR / "test.csv"  # Optional, for inference
+# NOTE: test dataset will be used for evaluation
 
 # ============================================================================
 # Preprocessing
@@ -208,28 +214,6 @@ preprocessor.fit(str(train_path))
 # Save artifacts for later use
 print(f"Saving preprocessing artifacts for '{dataset_name}'...")
 preprocessor.save_artifacts(dataset_name)
-
-# Extract task type for dataset creation (if task config is available)
-task_type = None
-if task_config is not None:
-    # Get task name from Pydantic model
-    from saab_v3.tasks.config import (
-        ClassificationTaskConfig,
-        RankingTaskConfig,
-        RegressionTaskConfig,
-        TokenClassificationTaskConfig,
-    )
-
-    if isinstance(task_config, ClassificationTaskConfig):
-        task_type = "classification"
-    elif isinstance(task_config, RankingTaskConfig):
-        task_type = "ranking"
-    elif isinstance(task_config, RegressionTaskConfig):
-        task_type = "regression"
-    elif isinstance(task_config, TokenClassificationTaskConfig):
-        task_type = "token_classification"
-
-    print(f"✓ Task type: {task_type}")
 
 # Create datasets
 print("Creating datasets...")
@@ -278,28 +262,16 @@ print(f"  - num_heads: {model.num_heads}")
 # Task Head and Loss Function
 # ============================================================================
 
-task_head = None
-loss_fn = None
+# Create task head from Pydantic config
+task_head = create_task_head_from_config(task_config, d_model=model_config.d_model)
+print(f"✓ Task head created: {task_head.__class__.__name__}")
 
-if task_config is not None:
-    # task_config is a Pydantic model
-    from saab_v3.tasks import create_task_head_from_config
+# Extract loss params from task config (filters out task head params)
+loss_params = task_config.get_loss_params()
 
-    # Create task head from Pydantic config
-    task_head = create_task_head_from_config(task_config, d_model=model_config.d_model)
-    print(f"✓ Task head created: {task_head.__class__.__name__}")
-
-    # Extract task params from Pydantic model and create loss function
-    task_params = task_config.model_dump()
-
-    # Add default label_smoothing for classification tasks if not provided
-    if task_type == "classification" and "label_smoothing" not in task_params:
-        task_params["label_smoothing"] = 0.1  # Default to 0.1 for regularization
-
-    from saab_v3.training.loss import create_loss_fn
-
-    loss_fn = create_loss_fn(task_type, **task_params)
-    print(f"✓ Loss function created for task: {task_type}")  # noqa: F541
+# Create loss function from task type and loss params
+loss_fn = create_loss_fn(task_type, **loss_params)
+print(f"✓ Loss function created for task: {task_type}")
 
 # ============================================================================
 # Training
@@ -308,31 +280,23 @@ if task_config is not None:
 print(f"\nInitializing trainer for experiment: {experiment_name}...")
 
 # Prepare configs for checkpointing
-# Convert model_config to dict if it's a Pydantic model
-if model_config is not None:
-    model_config_dict = (
-        model_config.model_dump()
-        if hasattr(model_config, "model_dump")
-        else model_config.__dict__
-    )
-else:
-    model_config_dict = None
+model_config_dict = (
+    model_config.model_dump()
+    if hasattr(model_config, "model_dump")
+    else model_config.__dict__
+)
 
 # Convert task_config to dict for checkpointing if it's a Pydantic model
-task_config_dict = None
-if task_config is not None:
-    task_config_dict = (
-        task_config.model_dump() if hasattr(task_config, "model_dump") else task_config
-    )
+task_config_dict = (
+    task_config.model_dump() if hasattr(task_config, "model_dump") else task_config
+)
 
 # Convert preprocessing_config to dict for checkpointing if it's a Pydantic model
-preprocessing_config_dict = None
-if preprocessing_config is not None:
-    preprocessing_config_dict = (
-        preprocessing_config.model_dump()
-        if hasattr(preprocessing_config, "model_dump")
-        else preprocessing_config.__dict__
-    )
+preprocessing_config_dict = (
+    preprocessing_config.model_dump()
+    if hasattr(preprocessing_config, "model_dump")
+    else preprocessing_config.__dict__
+)
 
 trainer = Trainer(
     model=model,
