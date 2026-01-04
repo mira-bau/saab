@@ -279,6 +279,29 @@ def spec_batcher_labels_classification(sample_encoded_sequences):
     assert torch.equal(batch.labels, torch.tensor([0, 1], dtype=torch.long))
 
 
+def spec_batcher_labels_classification_float_input(sample_encoded_sequences):
+    """Verify Batcher converts float labels to long dtype for classification."""
+    # Arrange
+    batcher = Batcher(max_seq_len=512, device=torch.device("cpu"))
+    # Add float labels (e.g., from pandas CSV reading) that should be converted to int
+    # Fixtures now return (seq, token_ids, encoded_tags, label) tuples
+    sequences_with_float_labels = [
+        (seq, token_ids, encoded_tags, label)
+        for (seq, token_ids, encoded_tags, _), label in zip(
+            sample_encoded_sequences, [0.0, 1.0]
+        )
+    ]
+
+    # Act
+    batch = batcher.batch(sequences_with_float_labels)
+
+    # Assert
+    assert batch.labels is not None
+    assert batch.labels.shape == (2,)  # [batch]
+    assert batch.labels.dtype == torch.long  # Should be long, not float
+    assert torch.equal(batch.labels, torch.tensor([0, 1], dtype=torch.long))
+
+
 def spec_batcher_labels_multi_label(sample_encoded_sequences):
     """Verify Batcher batches multi-label classification labels correctly."""
     # Arrange

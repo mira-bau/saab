@@ -109,7 +109,7 @@ model_type = args.model_type
 resume_checkpoint = args.resume
 experiment_name = args.experiment_name or f"{dataset_name}_{model_type}"
 
-device = "mps"
+device = "cuda"
 
 # ============================================================================
 # Configuration - Single Source of Truth: Pydantic Defaults
@@ -124,10 +124,13 @@ preprocessing_config = PreprocessingConfig(
 model_config = ModelConfig(
     device=device,
     dropout=0.2,
+    num_layers=4,
+    num_heads=6,
 )  # Increased for regularization
 training_config = TrainingConfig(
     device=device,
-    num_epochs=5,
+    num_epochs=None,  # Using max_steps instead
+    max_steps=10000,  # Limit to 10,000 steps for comparison
     learning_rate=1e-6,
     batch_size=64,
     lr_schedule="reduce_on_plateau",

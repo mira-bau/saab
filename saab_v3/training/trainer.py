@@ -540,19 +540,35 @@ class Trainer:
         loss = loss / self.config.gradient_accumulation_steps
         loss.backward()
 
+        # Clear MPS cache after backward pass to free memory (only for MPS device)
+        if self.config.device == "mps" and torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+
         # Add loss to metrics
         step_metrics["loss"] = loss_value
 
         # Update weights (if gradient accumulation is complete)
         if (self.current_step + 1) % self.config.gradient_accumulation_steps == 0:
+            # Clear MPS cache before gradient validation to free memory (only for MPS device)
+            if self.config.device == "mps" and torch.backends.mps.is_available():
+                torch.mps.empty_cache()
+            
             # Gradient validation
             has_nan_grad = False
             nan_grad_params = []
+            param_count = 0
             for name, param in self.model.named_parameters():
                 if param.grad is not None:
-                    if torch.isnan(param.grad).any() or torch.isinf(param.grad).any():
+                    # Check for NaN/Inf more memory-efficiently
+                    grad_data = param.grad.data
+                    if torch.isnan(grad_data).any() or torch.isinf(grad_data).any():
                         nan_grad_params.append(name)
                         has_nan_grad = True
+                    # Clear cache periodically during validation for large models (every 50 params)
+                    param_count += 1
+                    if (self.config.device == "mps" and torch.backends.mps.is_available() 
+                        and param_count % 50 == 0):
+                        torch.mps.empty_cache()
 
             if has_nan_grad:
                 self.warning_logger.warning(
@@ -600,6 +616,10 @@ class Trainer:
             # Optimizer step
             self.optimizer.step()
             self.optimizer.zero_grad()
+
+            # Clear MPS cache to prevent memory issues (only for MPS device)
+            if self.config.device == "mps" and torch.backends.mps.is_available():
+                torch.mps.empty_cache()
 
             # LR scheduler step (only for time-based schedulers, not ReduceLROnPlateau)
             if self.scheduler is not None and not self.is_plateau_scheduler:
