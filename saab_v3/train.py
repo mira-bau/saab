@@ -7,6 +7,7 @@ Usage:
 Required Arguments:
     --dataset-name, --dataset: Name of the dataset directory in dataset/raw/
     --model-type, --model: Model type ('flat', 'scratch', or 'saab')
+    --device: Device to use for training ('cuda', 'cpu', etc.)
 
 Optional Arguments:
     --resume: Path to checkpoint to resume training from
@@ -14,12 +15,13 @@ Optional Arguments:
 
 Examples:
     # Basic training without task head (unsupervised/pretraining)
-    poetry run python -m saab_v3.train --dataset-name mydataset --model-type saab
+    poetry run python -m saab_v3.train --dataset-name mydataset --model-type saab --device cuda
 
     # Resume training from checkpoint
     poetry run python -m saab_v3.train \\
         --dataset-name mydataset \\
         --model-type saab \\
+        --device cuda \\
         --resume checkpoints/mydataset_saab/checkpoint_epoch_5.pt
 
 Configuration:
@@ -102,14 +104,19 @@ parser.add_argument(
     default=None,
     help="Experiment name (default: {dataset_name}_{model_type})",
 )
+parser.add_argument(
+    "--device",
+    type=str,
+    required=True,
+    help="Device to use for training (e.g., 'cuda', 'cpu')",
+)
 args = parser.parse_args()
 
 dataset_name = args.dataset_name
 model_type = args.model_type
 resume_checkpoint = args.resume
 experiment_name = args.experiment_name or f"{dataset_name}_{model_type}"
-
-device = "cuda"
+device = args.device
 
 # ============================================================================
 # Configuration - Single Source of Truth: Pydantic Defaults
