@@ -325,6 +325,15 @@ if task_config is not None:
         task_config.model_dump() if hasattr(task_config, "model_dump") else task_config
     )
 
+# Convert preprocessing_config to dict for checkpointing if it's a Pydantic model
+preprocessing_config_dict = None
+if preprocessing_config is not None:
+    preprocessing_config_dict = (
+        preprocessing_config.model_dump()
+        if hasattr(preprocessing_config, "model_dump")
+        else preprocessing_config.__dict__
+    )
+
 trainer = Trainer(
     model=model,
     config=training_config,
@@ -336,6 +345,9 @@ trainer = Trainer(
     experiment_name=experiment_name,
     model_config=model_config_dict,
     task_config=task_config_dict,
+    preprocessing_config=preprocessing_config_dict,
+    dataset_name=dataset_name,
+    model_type=model_type,
 )
 
 # Resume from checkpoint if provided

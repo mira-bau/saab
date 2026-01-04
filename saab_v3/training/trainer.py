@@ -35,6 +35,9 @@ class Trainer:
         experiment_name: str = "experiment",
         model_config: dict | None = None,
         task_config: dict | None = None,
+        preprocessing_config: dict | None = None,
+        dataset_name: str | None = None,
+        model_type: str | None = None,
     ):
         """Initialize trainer.
 
@@ -49,6 +52,9 @@ class Trainer:
             experiment_name: Name of experiment (for checkpoint/logging directories)
             model_config: Optional model configuration dict to save in checkpoint
             task_config: Optional task configuration dict to save in checkpoint
+            preprocessing_config: Optional preprocessing configuration dict to save in checkpoint
+            dataset_name: Optional dataset name to save in checkpoint
+            model_type: Optional model type ('flat', 'scratch', or 'saab') to save in checkpoint
         """
         self.model = model
         self.config = config
@@ -59,6 +65,9 @@ class Trainer:
         self.experiment_name = experiment_name
         self.model_config = model_config
         self.task_config = task_config
+        self.preprocessing_config = preprocessing_config
+        self.dataset_name = dataset_name
+        self.model_type = model_type
 
         # Set random seeds for reproducibility
         self._set_random_seeds(config.seed)
@@ -210,6 +219,23 @@ class Trainer:
         
         if task_config is not None:
             self._config_dict["task"] = task_config
+        
+        # Add preprocessing_config, dataset_name, model_type, and experiment_name
+        if preprocessing_config is not None:
+            # If it's a Pydantic model, dump it; otherwise use as-is
+            if hasattr(preprocessing_config, "model_dump"):
+                self._config_dict["preprocessing_config"] = preprocessing_config.model_dump()
+            else:
+                self._config_dict["preprocessing_config"] = preprocessing_config
+        
+        if dataset_name is not None:
+            self._config_dict["dataset_name"] = dataset_name
+        
+        if model_type is not None:
+            self._config_dict["model_type"] = model_type
+        
+        # Always save experiment_name for metadata
+        self._config_dict["experiment_name"] = experiment_name
 
     def _set_random_seeds(self, seed: int):
         """Set all random seeds for reproducibility."""
