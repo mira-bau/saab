@@ -1,5 +1,7 @@
 """Combined embedding module that sums all embedding types."""
 
+import math
+
 import torch
 import torch.nn as nn
 
@@ -18,6 +20,11 @@ class CombinedEmbedding(nn.Module):
 
     Supports different configurations for Flat (token + positional only)
     and Scratch/SAAB (all embeddings) models.
+
+    The combined embeddings are scaled by sqrt(d_model) after summing to keep
+    embedding magnitudes in a reasonable range, following standard transformer
+    practices (BERT, GPT, etc.). This prevents large initial activations and
+    improves training stability.
     """
 
     def __init__(
@@ -116,11 +123,16 @@ class CombinedEmbedding(nn.Module):
     def forward(self, batch: Batch) -> torch.Tensor:
         """Apply combined embedding.
 
+        Sums all enabled embedding types (token, positional, and optional
+        structural embeddings) and scales the result by sqrt(d_model) to
+        maintain reasonable embedding magnitudes.
+
         Args:
             batch: Batch object containing all token and tag indices
 
         Returns:
-            Combined embeddings of shape [batch_size, seq_len, d_model]
+            Combined embeddings of shape [batch_size, seq_len, d_model],
+            scaled by sqrt(d_model)
         """
         # Token embedding (always)
         token_emb = self.token_embedding(batch.token_ids)
@@ -144,5 +156,9 @@ class CombinedEmbedding(nn.Module):
 
         if self.use_time and self.time_embedding is not None:
             combined = combined + self.time_embedding(batch.time_ids)
+
+        # Scale embeddings to keep magnitude reasonable
+        # Standard practice: scale by sqrt(d_model) to prevent large initial activations
+        combined = combined * math.sqrt(self.d_model)
 
         return combined

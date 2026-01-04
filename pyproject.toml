@@ -15,7 +15,8 @@ dependencies = [
     "pyyaml (>=6.0.3,<7.0.0)",
     "pydantic (>=2.12.5,<3.0.0)",
     "networkx (>=3.6.1,<4.0.0)",
-    "hypothesis (>=6.148.9,<7.0.0)"
+    "hypothesis (>=6.148.9,<7.0.0)",
+    "scikit-learn (>=1.6.0,<2.0.0)"
 ]
 
 

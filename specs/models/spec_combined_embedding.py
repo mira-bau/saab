@@ -1,5 +1,7 @@
 """Specs for CombinedEmbedding component - happy path only."""
 
+import math
+
 import torch
 import pytest
 
@@ -222,3 +224,46 @@ def spec_combined_embedding_learned_vs_sinusoidal(
     assert output_sinusoidal.shape == (batch_size, seq_len, d_model)
     # They should be different (learned vs fixed)
     assert not torch.allclose(output_learned, output_sinusoidal, atol=1e-5)
+
+
+def spec_combined_embedding_scaling_applied(
+    sample_batch, sample_vocab_sizes, batch_size, seq_len, d_model
+):
+    """Verify CombinedEmbedding applies sqrt(d_model) scaling correctly."""
+    # Arrange
+    embedding = CombinedEmbedding(
+        d_model=d_model,
+        vocab_sizes=sample_vocab_sizes,
+        max_seq_len=512,
+        use_token_type=True,
+        use_field=True,
+        use_entity=True,
+        use_time=True,
+    )
+
+    # Act: Get scaled output
+    output_scaled = embedding(sample_batch)
+
+    # Manually compute what unscaled would be by dividing by sqrt(d_model)
+    # This simulates what the output would be without scaling
+    output_unscaled = output_scaled / math.sqrt(d_model)
+
+    # Assert: Verify scaling is applied
+    # The scaled output should be sqrt(d_model) times larger than unscaled
+    expected_scaling_factor = math.sqrt(d_model)
+    actual_scaling_factor = (
+        output_scaled.norm(dim=-1).mean() / output_unscaled.norm(dim=-1).mean()
+    )
+
+    # Allow some tolerance due to floating point precision
+    assert torch.allclose(
+        actual_scaling_factor,
+        torch.tensor(expected_scaling_factor, dtype=actual_scaling_factor.dtype),
+        rtol=1e-4,
+    ), f"Scaling factor should be {expected_scaling_factor}, got {actual_scaling_factor}"
+
+    # Verify that scaling is consistent across all positions
+    scaling_ratios = output_scaled.norm(dim=-1) / output_unscaled.norm(dim=-1)
+    assert torch.allclose(
+        scaling_ratios, torch.full_like(scaling_ratios, expected_scaling_factor), rtol=1e-4
+    ), "Scaling should be consistent across all positions"

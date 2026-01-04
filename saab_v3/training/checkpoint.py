@@ -39,6 +39,7 @@ class CheckpointManager:
         is_best: bool = False,
         is_latest: bool = False,
         config: dict | None = None,
+        task_head: nn.Module | None = None,
     ) -> Path:
         """Save checkpoint.
 
@@ -52,6 +53,7 @@ class CheckpointManager:
             is_best: Whether this is the best model so far
             is_latest: Whether this is the latest checkpoint
             config: Optional config dictionary to save
+            task_head: Optional task head to save
 
         Returns:
             Path to saved checkpoint
@@ -76,6 +78,7 @@ class CheckpointManager:
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "scheduler_state_dict": scheduler.state_dict() if scheduler is not None else None,
+            "task_head_state_dict": task_head.state_dict() if task_head is not None else None,
             "epoch": epoch,
             "step": step,
             "metrics": metrics,
@@ -108,6 +111,7 @@ class CheckpointManager:
         model: nn.Module,
         optimizer: torch.optim.Optimizer | None = None,
         scheduler: torch.optim.lr_scheduler._LRScheduler | None = None,
+        task_head: nn.Module | None = None,
         map_location: str | torch.device | None = None,
     ) -> dict:
         """Load checkpoint.
@@ -117,10 +121,11 @@ class CheckpointManager:
             model: Model to load state into
             optimizer: Optional optimizer to load state into
             scheduler: Optional scheduler to load state into
+            task_head: Optional task head to load state into
             map_location: Device to load checkpoint to (for CPU/GPU migration)
 
         Returns:
-            Dictionary with loaded state (epoch, step, metrics, config, etc.)
+            Dictionary with loaded state (epoch, step, metrics, config, task_head_state_dict, etc.)
 
         Raises:
             FileNotFoundError: If checkpoint file doesn't exist
@@ -149,11 +154,18 @@ class CheckpointManager:
         ):
             scheduler.load_state_dict(checkpoint_data["scheduler_state_dict"])
 
+        # Load task head state (if available and task_head provided)
+        task_head_state_dict = None
+        if task_head is not None and checkpoint_data.get("task_head_state_dict") is not None:
+            task_head.load_state_dict(checkpoint_data["task_head_state_dict"])
+            task_head_state_dict = checkpoint_data["task_head_state_dict"]
+
         return {
             "epoch": checkpoint_data.get("epoch", 0),
             "step": checkpoint_data.get("step", 0),
             "metrics": checkpoint_data.get("metrics", {}),
             "config": checkpoint_data.get("config"),
+            "task_head_state_dict": task_head_state_dict,
             "timestamp": checkpoint_data.get("timestamp"),
         }
 

@@ -14,7 +14,7 @@ def create_lr_scheduler(
     optimizer: torch.optim.Optimizer,
     config: "TrainingConfig",
     num_training_steps: int,
-) -> lr_scheduler._LRScheduler | None:
+) -> lr_scheduler._LRScheduler | lr_scheduler.ReduceLROnPlateau | None:
     """Create learning rate scheduler from config.
 
     Supports:
@@ -22,6 +22,7 @@ def create_lr_scheduler(
     - linear_warmup: Linear warmup then constant
     - linear_warmup_cosine: Linear warmup then cosine decay
     - linear_warmup_polynomial: Linear warmup then polynomial decay
+    - reduce_on_plateau: Adaptive LR reduction when validation metric plateaus
 
     Args:
         optimizer: Optimizer instance
@@ -37,7 +38,20 @@ def create_lr_scheduler(
     if config.lr_schedule == "constant":
         return None
 
-    # Calculate warmup steps
+    if config.lr_schedule == "reduce_on_plateau":
+        # Adaptive scheduler based on validation metric
+        # Note: verbose parameter removed - PyTorch's ReduceLROnPlateau doesn't support it
+        return lr_scheduler.ReduceLROnPlateau(
+            optimizer=optimizer,
+            mode=config.lr_mode,
+            factor=config.lr_factor,
+            patience=config.lr_patience,
+            threshold=config.lr_threshold,
+            min_lr=config.lr_min,
+            cooldown=config.lr_cooldown,
+        )
+
+    # Calculate warmup steps for time-based schedulers
     if config.warmup_steps is not None:
         warmup_steps = config.warmup_steps
     elif config.warmup_ratio is not None:

@@ -4,6 +4,6 @@
 task:
   name: classification
   params:
-    num_classes: 10
+    num_classes: 14
     multi_label: false
 

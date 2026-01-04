@@ -9,7 +9,8 @@ Required Arguments:
     --model-type, --model: Model type ('flat', 'scratch', or 'saab')
 
 Optional Arguments:
-    --task-config: Path to task configuration YAML file (for supervised learning)
+    --config: Path to full experiment configuration YAML file (preprocessing, model, training, task)
+    --task-config: Path to task configuration YAML file (for supervised learning, backward compatible)
     --resume: Path to checkpoint to resume training from
     --experiment-name: Name of experiment (default: {dataset_name}_{model_type})
 
@@ -17,7 +18,13 @@ Examples:
     # Basic training without task head (unsupervised/pretraining)
     poetry run python -m saab_v3.train --dataset-name mydataset --model-type saab
 
-    # Training with task head (supervised learning)
+    # Training with full experiment config (recommended)
+    poetry run python -m saab_v3.train \\
+        --dataset-name mydataset \\
+        --model-type saab \\
+        --config experiments/configs/examples/stable_training.yaml
+
+    # Training with task head only (backward compatible)
     poetry run python -m saab_v3.train \\
         --dataset-name mydataset \\
         --model-type saab \\
@@ -56,6 +63,7 @@ Task Configuration:
 import argparse
 from pathlib import Path
 
+from saab_v3.config.loader import load_experiment_config
 from saab_v3.models import (
     ModelConfig,
     create_flat_transformer,
@@ -108,10 +116,16 @@ parser.add_argument(
     help="Experiment name (default: {dataset_name}_{model_type})",
 )
 parser.add_argument(
+    "--config",
+    type=str,
+    default=None,
+    help="Path to full experiment configuration YAML file (optional)",
+)
+parser.add_argument(
     "--task-config",
     type=str,
     default=None,
-    help="Path to task configuration YAML file (optional)",
+    help="Path to task configuration YAML file (optional, backward compatible)",
 )
 args = parser.parse_args()
 
@@ -119,51 +133,114 @@ dataset_name = args.dataset_name
 model_type = args.model_type
 resume_checkpoint = args.resume
 experiment_name = args.experiment_name or f"{dataset_name}_{model_type}"
+config_path = args.config
 task_config_path = args.task_config
 
 # ============================================================================
 # Configuration
 # ============================================================================
 
-# Preprocessing config
-preprocessing_config = PreprocessingConfig(
-    vocab_size=30000,
-    max_seq_len=512,
-    device="auto",  # "auto" to auto-detect, or "cpu", "cuda", "mps"
-)
+# Priority: --config > --task-config + defaults > defaults only
+if config_path:
+    # Full experiment config (highest priority)
+    print(f"\nLoading full experiment configuration from {config_path}...")
+    preprocessing_config, model_config, training_config, task_config_from_file = load_experiment_config(
+        config_path
+    )
+    
+    # Use task config from full config if provided, otherwise use --task-config
+    if task_config_from_file is not None:
+        task_config_path = None  # Don't load separate task config
+        task_config = task_config_from_file
+        print("✓ Full experiment config loaded (includes task config)")
+    elif task_config_path:
+        # Load separate task config for backward compatibility
+        import yaml
+        print(f"Loading task configuration from {task_config_path}...")
+        with open(task_config_path, "r") as f:
+            task_config = yaml.safe_load(f)
+        print("✓ Full experiment config loaded (task config from separate file)")
+    else:
+        task_config = None
+        print("✓ Full experiment config loaded (no task config)")
+    
+    config_source = f"YAML config file: {config_path}"
+else:
+    # Use code defaults (with stable settings)
+    print("\nUsing code defaults for configuration...")
+    
+    # Preprocessing config
+    preprocessing_config = PreprocessingConfig(
+        vocab_size=30000,
+        max_seq_len=512,
+        device="auto",  # Auto-detect best device
+    )
+    
+    # Model config (reduced size for quick testing)
+    model_config = ModelConfig(
+        d_model=128,  # Reduced from 768 for faster testing
+        num_layers=2,  # Reduced from 12 for faster testing
+        num_heads=4,  # Reduced from 12 for faster testing
+        ffn_dim=512,  # Reduced from 3072 for faster testing
+        max_seq_len=512,
+        dropout=0.1,
+        device="auto",  # Auto-detect best device
+    )
+    
+    # Training config (stable settings)
+    training_config = TrainingConfig(
+        optimizer_type="adamw",
+        learning_rate=1e-6,  # Stable learning rate
+        weight_decay=0.01,
+        batch_size=16,  # Increased for more stable gradients
+        num_epochs=1,  # Single epoch for quick test
+        lr_schedule="constant",  # Constant schedule
+        warmup_steps=None,  # None for constant schedule
+        gradient_accumulation_steps=1,
+        max_grad_norm=0.1,  # Aggressive gradient clipping for stability
+        seed=42,
+        log_steps=100,
+        log_epochs=True,
+        eval_epochs=1,
+        save_epochs=1,
+        save_best=True,
+        best_metric="loss",
+        best_mode="min",
+        device="auto",  # Auto-detect best device
+    )
+    
+    # Load task config if provided
+    if task_config_path:
+        import yaml
+        print(f"Loading task configuration from {task_config_path}...")
+        with open(task_config_path, "r") as f:
+            task_config = yaml.safe_load(f)
+        print("✓ Task configuration loaded")
+    else:
+        task_config = None
+    
+    config_source = "Code defaults"
 
-# Model config
-model_config = ModelConfig(
-    d_model=768,
-    num_layers=12,
-    num_heads=12,
-    ffn_dim=3072,
-    max_seq_len=512,
-    dropout=0.1,
-    device="auto",  # Should match preprocessing_config.device
-)
-
-# Training config
-training_config = TrainingConfig(
-    optimizer_type="adamw",
-    learning_rate=1e-4,
-    weight_decay=0.01,
-    batch_size=32,
-    num_epochs=10,
-    lr_schedule="linear_warmup_cosine",
-    warmup_steps=1000,
-    gradient_accumulation_steps=1,
-    max_grad_norm=1.0,
-    seed=42,
-    log_steps=100,
-    log_epochs=True,
-    eval_epochs=1,
-    save_epochs=1,
-    save_best=True,
-    best_metric="loss",
-    best_mode="min",
-    device="auto",  # Should match preprocessing_config.device
-)
+# Print configuration summary
+print(f"\n{'='*60}")
+print(f"Configuration Source: {config_source}")
+print(f"{'='*60}")
+print(f"Preprocessing:")
+print(f"  - vocab_size: {preprocessing_config.vocab_size}")
+print(f"  - max_seq_len: {preprocessing_config.max_seq_len}")
+print(f"  - device: {preprocessing_config.device}")
+print(f"\nModel:")
+print(f"  - d_model: {model_config.d_model}")
+print(f"  - num_layers: {model_config.num_layers}")
+print(f"  - num_heads: {model_config.num_heads}")
+print(f"  - device: {model_config.device}")
+print(f"\nTraining:")
+print(f"  - learning_rate: {training_config.learning_rate}")
+print(f"  - batch_size: {training_config.batch_size}")
+print(f"  - lr_schedule: {training_config.lr_schedule}")
+print(f"  - max_grad_norm: {training_config.max_grad_norm}")
+print(f"  - device: {training_config.device}")
+print(f"{'='*60}\n")
 
 # ============================================================================
 # Dataset Paths
@@ -205,17 +282,9 @@ preprocessor.fit(str(train_path))
 print(f"Saving preprocessing artifacts for '{dataset_name}'...")
 preprocessor.save_artifacts(dataset_name)
 
-# Load task config early if provided (needed for dataset creation)
+# Extract task type for dataset creation (if task config is available)
 task_type = None
-task_config = None
-if task_config_path:
-    import yaml
-
-    print(f"\nLoading task configuration from {task_config_path}...")
-    with open(task_config_path, "r") as f:
-        task_config = yaml.safe_load(f)
-
-    # Extract task type for dataset creation
+if task_config is not None:
     task_type = task_config["task"]["name"]
     print(f"✓ Task type: {task_type}")
 
@@ -269,7 +338,7 @@ print(f"  - num_heads: {model.num_heads}")
 task_head = None
 loss_fn = None
 
-if task_config_path:
+if task_config is not None:
     # task_config and task_type already loaded above
     # Validate config
     from saab_v3.tasks import validate_task_config, create_task_head_from_config
@@ -283,7 +352,11 @@ if task_config_path:
 
     # Extract task type and create loss function
     task_type = task_config["task"]["name"]
-    task_params = task_config["task"]["params"]
+    task_params = task_config["task"]["params"].copy()  # Copy to avoid modifying original
+    
+    # Add default label_smoothing for classification tasks if not provided
+    if task_type == "classification" and "label_smoothing" not in task_params:
+        task_params["label_smoothing"] = 0.1  # Default to 0.1 for regularization
 
     from saab_v3.training.loss import create_loss_fn
 
@@ -295,6 +368,14 @@ if task_config_path:
 # ============================================================================
 
 print(f"\nInitializing trainer for experiment: {experiment_name}...")
+
+# Prepare configs for checkpointing
+# Convert model_config to dict if it's a Pydantic model
+if model_config is not None:
+    model_config_dict = model_config.model_dump() if hasattr(model_config, "model_dump") else model_config.__dict__
+else:
+    model_config_dict = None
+
 trainer = Trainer(
     model=model,
     config=training_config,
@@ -304,6 +385,8 @@ trainer = Trainer(
     loss_fn=loss_fn,
     task_type=task_type,
     experiment_name=experiment_name,
+    model_config=model_config_dict,
+    task_config=task_config,
 )
 
 # Resume from checkpoint if provided

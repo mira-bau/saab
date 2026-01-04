@@ -161,7 +161,12 @@ class MetricsLogger:
         print(f"\n[{phase.upper()}] Step {step}:")
         for name, value in sorted(metrics.items()):
             if isinstance(value, float):
-                print(f"  {name}: {value:.6f}")
+                # Use scientific notation for very small values (like learning rates during warmup)
+                # or for learning_rate specifically
+                if "learning_rate" in name.lower() or abs(value) < 1e-5:
+                    print(f"  {name}: {value:.2e}")
+                else:
+                    print(f"  {name}: {value:.6f}")
             else:
                 print(f"  {name}: {value}")
 
@@ -171,7 +176,12 @@ class MetricsLogger:
         print(f"[{phase.upper()}] Epoch {epoch}:")
         for name, value in sorted(metrics.items()):
             if isinstance(value, float):
-                print(f"  {name}: {value:.6f}")
+                # Use scientific notation for very small values (like learning rates during warmup)
+                # or for learning_rate specifically
+                if "learning_rate" in name.lower() or abs(value) < 1e-5:
+                    print(f"  {name}: {value:.2e}")
+                else:
+                    print(f"  {name}: {value:.6f}")
             else:
                 print(f"  {name}: {value}")
         print(f"{'='*60}")

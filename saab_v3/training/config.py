@@ -75,11 +75,19 @@ class TrainingConfig(BaseConfig):
     eps: float = 1e-8
 
     # Learning rate schedule
-    lr_schedule: str = "linear_warmup_cosine"  # "constant", "linear_warmup", "linear_warmup_cosine", "linear_warmup_polynomial"
+    lr_schedule: str = "linear_warmup_cosine"  # "constant", "linear_warmup", "linear_warmup_cosine", "linear_warmup_polynomial", "reduce_on_plateau"
     warmup_steps: int | None = None
     warmup_ratio: float | None = None  # Alternative to warmup_steps
     max_steps: int | None = None  # For LR schedule
     min_lr_ratio: float = 0.0  # Minimum LR as ratio of initial LR
+    
+    # ReduceLROnPlateau parameters (only used when lr_schedule="reduce_on_plateau")
+    lr_mode: str = "min"  # "min" or "max" - whether to minimize or maximize the metric
+    lr_factor: float = 0.5  # Factor by which LR is reduced (new_lr = old_lr * factor)
+    lr_patience: int = 3  # Number of epochs with no improvement before reducing LR
+    lr_threshold: float = 1e-4  # Minimum change to qualify as improvement
+    lr_min: float = 1e-8  # Minimum learning rate threshold
+    lr_cooldown: int = 0  # Number of epochs to wait before resuming normal operation after LR reduction
 
     # Training settings
     batch_size: int = 32
@@ -110,7 +118,13 @@ class TrainingConfig(BaseConfig):
     # Validation
     eval_steps: int | None = None  # Evaluate every N steps
     eval_epochs: int = 1  # Evaluate every N epochs
-    eval_metrics: list[str] = ["loss"]  # Metrics to compute during validation
+    eval_metrics: list[str] = ["loss"]
+
+    # Early stopping
+    early_stop_zero_loss_steps: int | None = None  # Stop if loss is zero for N consecutive steps
+    early_stopping_patience: int | None = None  # Stop if validation metric doesn't improve for N epochs
+    early_stopping_min_delta: float = 0.0  # Minimum change to qualify as improvement
+    early_stopping_metric: str = "loss"  # Metric to monitor for early stopping
 
     @field_validator("optimizer_type")
     @classmethod
@@ -140,9 +154,49 @@ class TrainingConfig(BaseConfig):
     @classmethod
     def validate_lr_schedule(cls, v: str) -> str:
         """Validate LR schedule type."""
-        valid_schedules = ["constant", "linear_warmup", "linear_warmup_cosine", "linear_warmup_polynomial"]
+        valid_schedules = ["constant", "linear_warmup", "linear_warmup_cosine", "linear_warmup_polynomial", "reduce_on_plateau"]
         if v not in valid_schedules:
             raise ValueError(f"lr_schedule must be one of {valid_schedules}, got {v}")
+        return v
+    
+    @field_validator("lr_mode")
+    @classmethod
+    def validate_lr_mode(cls, v: str) -> str:
+        """Validate LR mode for ReduceLROnPlateau."""
+        if v not in ["min", "max"]:
+            raise ValueError(f"lr_mode must be one of ['min', 'max'], got {v}")
+        return v
+    
+    @field_validator("lr_factor")
+    @classmethod
+    def validate_lr_factor(cls, v: float) -> float:
+        """Validate LR factor is in (0, 1)."""
+        if not 0 < v < 1:
+            raise ValueError(f"lr_factor must be in (0, 1), got {v}")
+        return v
+    
+    @field_validator("lr_patience")
+    @classmethod
+    def validate_lr_patience(cls, v: int) -> int:
+        """Validate LR patience is positive."""
+        if v <= 0:
+            raise ValueError(f"lr_patience must be > 0, got {v}")
+        return v
+    
+    @field_validator("lr_min")
+    @classmethod
+    def validate_lr_min(cls, v: float) -> float:
+        """Validate minimum LR is positive."""
+        if v <= 0:
+            raise ValueError(f"lr_min must be > 0, got {v}")
+        return v
+    
+    @field_validator("lr_cooldown")
+    @classmethod
+    def validate_lr_cooldown(cls, v: int) -> int:
+        """Validate LR cooldown is non-negative."""
+        if v < 0:
+            raise ValueError(f"lr_cooldown must be >= 0, got {v}")
         return v
 
     @field_validator("warmup_steps")
@@ -254,6 +308,38 @@ class TrainingConfig(BaseConfig):
             raise ValueError(f"eval_epochs must be > 0, got {v}")
         return v
 
+    @field_validator("early_stop_zero_loss_steps")
+    @classmethod
+    def validate_early_stop_zero_loss_steps(cls, v: int | None) -> int | None:
+        """Validate early_stop_zero_loss_steps is positive if provided."""
+        if v is not None and v <= 0:
+            raise ValueError(f"early_stop_zero_loss_steps must be > 0, got {v}")
+        return v
+
+    @field_validator("early_stopping_patience")
+    @classmethod
+    def validate_early_stopping_patience(cls, v: int | None) -> int | None:
+        """Validate early_stopping_patience is positive if provided."""
+        if v is not None and v <= 0:
+            raise ValueError(f"early_stopping_patience must be > 0, got {v}")
+        return v
+
+    @field_validator("early_stopping_min_delta")
+    @classmethod
+    def validate_early_stopping_min_delta(cls, v: float) -> float:
+        """Validate early_stopping_min_delta is non-negative."""
+        if v < 0:
+            raise ValueError(f"early_stopping_min_delta must be >= 0, got {v}")
+        return v
+
+    @field_validator("early_stopping_metric")
+    @classmethod
+    def validate_early_stopping_metric(cls, v: str) -> str:
+        """Validate early_stopping_metric is a valid metric name."""
+        if not v or not isinstance(v, str):
+            raise ValueError(f"early_stopping_metric must be a non-empty string, got {v}")
+        return v
+
     @model_validator(mode="after")
     def validate_training_duration(self) -> "TrainingConfig":
         """Ensure either num_epochs or max_steps is set."""
@@ -264,9 +350,9 @@ class TrainingConfig(BaseConfig):
     @model_validator(mode="after")
     def validate_warmup(self) -> "TrainingConfig":
         """Ensure warmup is properly configured if warmup is enabled."""
-        if self.lr_schedule != "constant":
+        if self.lr_schedule not in ["constant", "reduce_on_plateau"]:
             if self.warmup_steps is None and self.warmup_ratio is None:
                 raise ValueError(
-                    "Either warmup_steps or warmup_ratio must be set when lr_schedule != 'constant'"
+                    "Either warmup_steps or warmup_ratio must be set when lr_schedule != 'constant' and != 'reduce_on_plateau'"
                 )
         return self

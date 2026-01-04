@@ -1,0 +1,108 @@
+# Stable Training Configuration
+# This config uses hyperparameters optimized for training stability
+# Recommended for initial experiments and debugging
+
+preprocessing:
+  vocab_size: 30000
+  max_seq_len: 512
+  extractor_type: null  # null = auto-detect
+  extractor_schema: null
+  device: "auto"  # Auto-detect best device
+
+model:
+  # Architecture (reduced size for faster testing)
+  d_model: 128
+  num_layers: 2
+  num_heads: 4
+  ffn_dim: 512
+  max_seq_len: 512
+  
+  # Regularization
+  dropout: 0.2  # Increased from 0.1 for better regularization to prevent overfitting
+  layer_norm_eps: 1e-5
+  
+  # Embeddings
+  positional_learned: true
+  
+  # SAAB-specific (only used for SAABTransformer)
+  lambda_bias: 1.0
+  learnable_lambda: false
+  bias_normalization: 1.0
+  
+  device: "auto"
+
+training:
+  # Optimizer settings
+  optimizer_type: "adamw"
+  learning_rate: 1e-6  # Stable learning rate (reduced from default)
+  weight_decay: 0.01
+  beta1: 0.9
+  beta2: 0.999
+  eps: 1e-8
+  
+  # Learning rate schedule
+  # Options: "constant", "linear_warmup", "linear_warmup_cosine", "linear_warmup_polynomial", "reduce_on_plateau"
+  lr_schedule: "reduce_on_plateau"  # Adaptive LR reduction when validation loss plateaus
+  # For reduce_on_plateau:
+  lr_mode: "min"  # Reduce LR when metric stops decreasing
+  lr_factor: 0.5  # Multiply LR by this factor when reducing
+  lr_patience: 3  # Number of epochs with no improvement before reducing LR
+  lr_threshold: 1e-4  # Minimum change to qualify as improvement
+  lr_min: 1e-8  # Minimum learning rate threshold
+  lr_cooldown: 0  # Number of epochs to wait before resuming normal operation
+  # For time-based schedules (linear_warmup_cosine, etc.):
+  # warmup_ratio: 0.1  # 10% of training steps for warmup
+  # min_lr_ratio: 0.01  # Decay to 1% of initial LR
+  
+  # Training settings
+  batch_size: 64  # Increased for faster training
+  num_epochs: 5  # Reduced for initial testing (can increase later if needed)
+  gradient_accumulation_steps: 1
+  max_grad_norm: 0.1  # Aggressive gradient clipping for stability
+  seed: 42
+  
+  # Checkpointing
+  save_dir: null  # Auto: checkpoints/{experiment_name}/
+  save_steps: null
+  save_epochs: 1
+  keep_checkpoints: 3
+  save_best: true
+  best_metric: "loss"
+  best_mode: "min"
+  
+  # Logging
+  log_dir: null  # Auto: logs/{experiment_name}/
+  log_steps: 100
+  log_epochs: true
+  use_tensorboard: false
+  use_wandb: false
+  wandb_project: null
+  wandb_run_name: null
+  
+  # Validation
+  eval_steps: null
+  eval_epochs: 1
+  eval_metrics: ["loss"]
+  
+  # Early stopping
+  early_stop_zero_loss_steps: 100  # Stop if loss is zero for 100 consecutive steps
+  early_stopping_patience: 3  # Stop if validation metric doesn't improve for 3 epochs
+  early_stopping_min_delta: 0.001  # Minimum change to qualify as improvement
+  early_stopping_metric: "loss"  # Metric to monitor for early stopping
+  
+  device: "auto"
+
+# Task configuration (example: multi-class classification)
+# Uncomment and modify as needed
+# Regularization settings:
+#   - dropout: 0.2 (increased from 0.1) prevents overfitting
+#   - label_smoothing: 0.1 prevents overconfident predictions
+#   - early_stopping: stops training when validation doesn't improve
+#   - lr_schedule: cosine decay prevents aggressive convergence
+task:
+  name: classification
+  params:
+    num_classes: 14
+    multi_label: false
+    label_smoothing: 0.1  # Prevents overfitting by smoothing labels
+

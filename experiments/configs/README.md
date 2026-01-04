@@ -1,8 +1,108 @@
-# Task Configuration Guide
+# Configuration Guide
 
-This directory contains configuration files for specifying task heads. The config-based approach ensures a single source of truth and makes experimentation easy.
+This directory contains configuration files for experiments. The config-based approach ensures a single source of truth and makes experimentation easy.
 
 ## Overview
+
+There are two types of configuration files:
+
+1. **Full Experiment Configs** - Complete configuration including preprocessing, model, training, and task settings (recommended)
+2. **Task Configs** - Task-only configuration for backward compatibility
+
+## Full Experiment Configuration (Recommended)
+
+Full experiment configs provide a single source of truth for all experiment settings. Use the `--config` argument when running training:
+
+```bash
+poetry run python -m saab_v3.train \
+    --dataset-name mydataset \
+    --model-type flat \
+    --config experiments/configs/examples/stable_training.yaml
+```
+
+### Config Structure
+
+Full experiment configs have four main sections:
+
+```yaml
+preprocessing:
+  vocab_size: 30000
+  max_seq_len: 512
+  device: "auto"
+
+model:
+  d_model: 768
+  num_layers: 12
+  num_heads: 12
+  # ... other model settings
+
+training:
+  learning_rate: 1e-6
+  batch_size: 16
+  lr_schedule: "constant"
+  # ... other training settings
+
+task:
+  name: classification
+  params:
+    num_classes: 14
+```
+
+### Config Priority
+
+The system uses the following priority order:
+
+1. **`--config`** (full experiment config) - Highest priority, single source of truth
+2. **`--task-config`** + code defaults - Backward compatible
+3. **Code defaults only** - Fallback
+
+### Examples
+
+- `examples/stable_training.yaml` - Stable training settings (recommended for initial experiments)
+- `saab_experiment.yaml` - Complete SAAB experiment example
+- `training_default.yaml` - Default training settings
+- `model_default.yaml` - Default model settings
+
+### Stable Training Defaults
+
+For stable training, use these recommended settings:
+
+- `learning_rate: 1e-6` (reduced from default 1e-4)
+- `lr_schedule: "constant"` (no warmup for stability)
+- `max_grad_norm: 0.1` (aggressive gradient clipping)
+- `batch_size: 16` (increased for more stable gradients)
+- `early_stop_zero_loss_steps: 100` (stop if loss collapses to zero)
+
+See `examples/stable_training.yaml` for a complete example.
+
+### Early Stopping Configuration
+
+The `early_stop_zero_loss_steps` parameter provides a safety mechanism to stop training when the model stops learning:
+
+- **Purpose**: Detects when loss collapses to zero (model has stopped learning)
+- **Default**: `null` (disabled)
+- **Recommended**: `100` for most experiments
+- **How it works**: Stops training if loss is zero (or < 1e-8) for N consecutive steps
+- **Warning**: A warning is logged when the streak reaches 50% of the threshold
+
+Example:
+```yaml
+training:
+  early_stop_zero_loss_steps: 100  # Stop after 100 consecutive zero-loss steps
+```
+
+To disable early stopping, set it to `null` or omit it from the config.
+
+## Task Configuration (Backward Compatible)
+
+Task configs define only the task head and loss function. Use the `--task-config` argument:
+
+```bash
+poetry run python -m saab_v3.train \
+    --dataset-name mydataset \
+    --model-type flat \
+    --task-config experiments/configs/examples/binary_classification.yaml
+```
 
 Task heads are created from YAML configuration files. The system validates configs at startup and provides clear error messages if something is wrong.
 
@@ -192,6 +292,31 @@ task:
 
 ### "Ranking method 'mlp' requires 'hidden_dims' parameter"
 - MLP and difference methods require `hidden_dims` to be specified
+
+### Negative Loss Warnings
+
+If you see warnings about negative loss values:
+
+1. **Check logit values**: Extreme logit values (>100 or <-100) can cause numerical overflow
+2. **Reduce learning rate**: Try lowering `learning_rate` (e.g., from `1e-6` to `5e-7`)
+3. **Increase gradient clipping**: Reduce `max_grad_norm` (e.g., from `0.1` to `0.05`)
+4. **Check batch size**: Very small batches can lead to unstable gradients
+
+The system automatically clamps logits to `[-50.0, 50.0]` to prevent overflow, but if warnings persist, the above adjustments may help.
+
+### Training Stops with "Loss has been zero"
+
+If training stops with a zero loss error:
+
+1. **This is expected behavior**: The model has stopped learning (loss collapsed to zero)
+2. **Check `early_stop_zero_loss_steps`**: This parameter controls when to stop (default: 100 steps)
+3. **Review training logs**: Check `warnings.log` for gradient collapse warnings
+4. **Possible causes**:
+   - Learning rate too high (model overcorrected)
+   - Model too small for the task
+   - Data preprocessing issues
+
+To disable early stopping, set `early_stop_zero_loss_steps: null` in your config.
 
 ## Further Reading
 
