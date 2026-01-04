@@ -1,9 +1,0 @@
-# Example: Multi-label Classification
-# This config creates a multi-label classification head with simple linear layer
-
-task:
-  name: classification
-  params:
-    num_classes: 10
-    multi_label: true
-

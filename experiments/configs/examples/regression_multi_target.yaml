@@ -1,8 +1,0 @@
-# Example: Multi-target Regression
-# This config creates a regression head for multiple continuous value prediction
-
-task:
-  name: regression
-  params:
-    num_targets: 5
-

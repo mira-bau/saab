@@ -1,8 +1,0 @@
-# Example: Token Classification
-# This config creates a token classification head for per-token labeling (NER, POS tagging)
-
-task:
-  name: token_classification
-  params:
-    num_labels: 10
-

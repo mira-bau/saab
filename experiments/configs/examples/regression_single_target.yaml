@@ -1,8 +1,0 @@
-# Example: Single-target Regression
-# This config creates a regression head for single continuous value prediction
-
-task:
-  name: regression
-  params:
-    num_targets: 1
-

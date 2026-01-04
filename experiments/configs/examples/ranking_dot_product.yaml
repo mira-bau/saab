@@ -1,8 +1,0 @@
-# Example: Ranking with Dot Product Method
-# This config creates a pairwise ranking head using dot product comparison
-
-task:
-  name: ranking
-  params:
-    method: "dot_product"
-

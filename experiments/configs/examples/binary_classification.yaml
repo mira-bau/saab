@@ -1,9 +1,0 @@
-# Example: Binary Classification
-# This config creates a binary classification head with simple linear layer
-
-task:
-  name: classification
-  params:
-    num_classes: 2
-    multi_label: false
-

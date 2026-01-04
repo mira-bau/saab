@@ -6,6 +6,13 @@ import torch.nn as nn
 
 from saab_v3.tasks.base import BaseTaskHead
 from saab_v3.tasks.classification import ClassificationHead
+from saab_v3.tasks.config import (
+    ClassificationTaskConfig,
+    RankingTaskConfig,
+    RegressionTaskConfig,
+    TaskConfig,
+    TokenClassificationTaskConfig,
+)
 from saab_v3.tasks.config_schema import (
     TaskName,
     validate_task_config,
@@ -17,16 +24,16 @@ from saab_v3.tasks.token_classification import TokenClassificationHead
 
 
 def create_task_head_from_config(
-    config: dict[str, Any],
+    config: TaskConfig | dict[str, Any],
     d_model: int,
 ) -> BaseTaskHead:
-    """Create task head from configuration.
+    """Create task head from Pydantic config or dict.
 
     Single entry point for creating task heads.
     Config is the only source of truth.
 
     Args:
-        config: Task configuration dict with 'task.name' and 'task.params'
+        config: Task configuration (Pydantic model or dict with 'task.name' and 'task.params')
         d_model: Model dimension (from encoder)
 
     Returns:
@@ -37,6 +44,12 @@ def create_task_head_from_config(
         ValueError: If config is invalid
 
     Example:
+        >>> # Using Pydantic config
+        >>> from saab_v3.tasks.config import ClassificationTaskConfig
+        >>> config = ClassificationTaskConfig(num_classes=10, multi_label=False)
+        >>> head = create_task_head_from_config(config, d_model=768)
+        >>>
+        >>> # Using dict (backward compatible)
         >>> config = {
         ...     "task": {
         ...         "name": "classification",
@@ -48,12 +61,33 @@ def create_task_head_from_config(
         ... }
         >>> head = create_task_head_from_config(config, d_model=768)
     """
-    # Validate config
-    validate_task_config(config)
+    # Convert dict to Pydantic if needed
+    if isinstance(config, dict):
+        # Validate dict config
+        validate_task_config(config)
+        task_config = _dict_to_task_config(config)
+    else:
+        # Already a Pydantic model
+        task_config = config
 
-    # Extract task name and params
-    task_name = config["task"]["name"]
-    task_params = config["task"]["params"].copy()  # Copy to avoid modifying original
+    # Extract task name and params from Pydantic model
+    if isinstance(task_config, ClassificationTaskConfig):
+        task_name = TaskName.CLASSIFICATION
+        task_params = task_config.model_dump()
+    elif isinstance(task_config, RankingTaskConfig):
+        task_name = TaskName.RANKING
+        task_params = task_config.model_dump()
+    elif isinstance(task_config, RegressionTaskConfig):
+        task_name = TaskName.REGRESSION
+        task_params = task_config.model_dump()
+    elif isinstance(task_config, TokenClassificationTaskConfig):
+        task_name = TaskName.TOKEN_CLASSIFICATION
+        task_params = task_config.model_dump()
+    else:
+        valid_tasks = [t.value for t in TaskName]
+        raise ValueError(
+            f"Unknown task config type: {type(task_config)}. Valid tasks: {valid_tasks}"
+        )
 
     # Task registry
     task_registry = {
@@ -63,12 +97,36 @@ def create_task_head_from_config(
         TaskName.TOKEN_CLASSIFICATION: _create_token_classification_head,
     }
 
-    if task_name not in task_registry:
-        valid_tasks = [t.value for t in TaskName]
-        raise ValueError(f"Unknown task: {task_name!r}. Valid tasks: {valid_tasks}")
-
     # Create task head
     return task_registry[task_name](d_model=d_model, **task_params)
+
+
+def _dict_to_task_config(config: dict[str, Any]) -> TaskConfig:
+    """Convert dict config to Pydantic task config.
+
+    Args:
+        config: Dict with 'task.name' and 'task.params'
+
+    Returns:
+        Pydantic TaskConfig instance
+
+    Raises:
+        ValueError: If task name is invalid
+    """
+    task_name = config["task"]["name"]
+    task_params = config["task"]["params"]
+
+    if task_name == TaskName.CLASSIFICATION:
+        return ClassificationTaskConfig(**task_params)
+    elif task_name == TaskName.RANKING:
+        return RankingTaskConfig(**task_params)
+    elif task_name == TaskName.REGRESSION:
+        return RegressionTaskConfig(**task_params)
+    elif task_name == TaskName.TOKEN_CLASSIFICATION:
+        return TokenClassificationTaskConfig(**task_params)
+    else:
+        valid_tasks = [t.value for t in TaskName]
+        raise ValueError(f"Unknown task: {task_name!r}. Valid tasks: {valid_tasks}")
 
 
 def _get_pooling_from_config(pooling_str: str | None) -> nn.Module | None:
