@@ -174,7 +174,7 @@ print()
 # ============================================================================
 
 # Dataset directory (all datasets must be in dataset/raw/)
-DATASET_DIR = Path(__file__).parent / "dataset" / "raw" / dataset_name
+DATASET_DIR = Path(__file__).parent.parent / "dataset" / "raw" / dataset_name
 
 # File paths
 train_path = DATASET_DIR / "train.csv"

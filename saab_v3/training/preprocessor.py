@@ -250,7 +250,7 @@ class Preprocessor:
                 base_path = self.config.data_dir
             else:
                 # Default: dataset/artifacts relative to saab_v3 package
-                base_path = Path(__file__).parent.parent / "dataset"
+                base_path = Path(__file__).parent.parent.parent / "dataset"
 
         artifacts_dir = base_path / "artifacts" / dataset_name
         artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -295,7 +295,7 @@ class Preprocessor:
         # Determine artifacts path
         if base_path is None:
             # Default: dataset/artifacts relative to saab_v3 package
-            default_path = Path(__file__).parent.parent / "dataset"
+            default_path = Path(__file__).parent.parent.parent / "dataset"
             artifacts_dir = default_path / "artifacts" / dataset_name
         else:
             artifacts_dir = base_path / "artifacts" / dataset_name

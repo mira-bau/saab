@@ -218,7 +218,7 @@ __marimo__/
 # Custom files
 .cursor/
 .DS_Store
-saab_v3/dataset/*/*
-!saab_v3/dataset/*/.gitkeep
+dataset/*/*
+!dataset/*/.gitkeep
 logs/
 checkpoints/

@@ -224,8 +224,8 @@ def verify_paths(dataset_name: str) -> tuple[bool, list[str]]:
     # Expected paths
     script_path = Path(__file__)
     base_dir = script_path.parent  # saab_v3/
-    raw_dir = base_dir / "dataset" / "raw" / dataset_name
-    artifacts_dir = base_dir / "dataset" / "artifacts" / dataset_name
+    raw_dir = base_dir.parent / "dataset" / "raw" / dataset_name
+    artifacts_dir = base_dir.parent / "dataset" / "artifacts" / dataset_name
 
     messages.append(f"Base directory: {base_dir}")
     messages.append(f"Expected raw data path: {raw_dir}")
@@ -281,8 +281,8 @@ def main():
     # Determine paths
     script_path = Path(__file__)
     base_dir = script_path.parent  # saab_v3/
-    raw_dir = base_dir / "dataset" / "raw" / dataset_name
-    artifacts_dir = base_dir / "dataset" / "artifacts" / dataset_name
+    raw_dir = base_dir.parent / "dataset" / "raw" / dataset_name
+    artifacts_dir = base_dir.parent / "dataset" / "artifacts" / dataset_name
 
     all_success = True
     all_messages = []
