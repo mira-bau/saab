@@ -171,6 +171,9 @@ def _create_classification_head(d_model: int, **params) -> ClassificationHead:
     """
     # Extract pooling if present
     pooling = _get_pooling_from_config(params.pop("pooling", None))
+    
+    # Remove loss-related parameters that aren't part of the head
+    params.pop("label_smoothing", None)
 
     return ClassificationHead(d_model=d_model, pooling=pooling, **params)
 
