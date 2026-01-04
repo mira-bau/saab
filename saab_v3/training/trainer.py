@@ -161,8 +161,8 @@ class Trainer:
         self.warning_logger.setLevel(logging.WARNING)
         # Remove existing handlers to avoid duplicates
         self.warning_logger.handlers.clear()
-        # File handler
-        file_handler = logging.FileHandler(warning_log_file)
+        # File handler (mode='w' to clear file on each execution)
+        file_handler = logging.FileHandler(warning_log_file, mode='w')
         file_handler.setLevel(logging.WARNING)
         formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
         file_handler.setFormatter(formatter)
