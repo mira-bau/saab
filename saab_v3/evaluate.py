@@ -159,7 +159,7 @@ checkpoint_data = torch.load(checkpoint_path, map_location="cpu", weights_only=F
 # Extract configs from checkpoint
 checkpoint_config = checkpoint_data.get("config", {})
 model_config_dict = checkpoint_config.get("model_config", {})
-task_config_dict = checkpoint_config.get("task_config", {})
+task_config_dict = checkpoint_config.get("task", {})
 preprocessing_config_dict = checkpoint_config.get("preprocessing_config", {})
 model_type = checkpoint_config.get("model_type", "scratch")
 dataset_name_from_checkpoint = checkpoint_config.get("dataset_name", dataset_name)
