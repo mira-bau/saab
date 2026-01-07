@@ -49,6 +49,12 @@ class ClassificationHead(BaseTaskHead):
             input_dim = d_model  # Simple linear mode
 
         self.output_layer = nn.Linear(input_dim, num_classes)
+        
+        # Initialize output layer with smaller weights to prevent extreme logits
+        # This helps with training stability and reduces logit saturation
+        nn.init.normal_(self.output_layer.weight, mean=0.0, std=0.01)
+        if self.output_layer.bias is not None:
+            nn.init.zeros_(self.output_layer.bias)
 
     def forward(
         self,

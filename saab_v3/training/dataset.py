@@ -46,8 +46,12 @@ class StructuredDataset(Dataset):
             # Store raw data for ranking pairs (will encode on-demand in __getitem__)
             self.encoded_sequences = None
         else:
-            # Transform: extract and tokenize
-            sequences = self.preprocessor.transform(self.raw_data)
+            # Exclude label columns from preprocessing to prevent data leakage
+            # Label columns: "label", "target", "y"
+            feature_data = self._exclude_label_columns(self.raw_data)
+            
+            # Transform: extract and tokenize (only from feature columns)
+            sequences = self.preprocessor.transform(feature_data)
 
             # Encode: convert to token IDs and encoded tags
             self.encoded_sequences = self.preprocessor.encode(sequences)
@@ -138,6 +142,31 @@ class StructuredDataset(Dataset):
             )
 
         # Unknown type
+        return data
+
+    def _exclude_label_columns(self, data: Any) -> Any:
+        """Exclude label columns from data to prevent data leakage.
+        
+        Args:
+            data: Input data (DataFrame, dict, list, etc.)
+            
+        Returns:
+            Data with label columns removed (for DataFrame) or original data (for other types)
+        """
+        # Label column names to exclude
+        label_columns = ["label", "target", "y"]
+        
+        # For DataFrames (CSV/Excel), drop label columns
+        if isinstance(data, pd.DataFrame):
+            columns_to_drop = [col for col in label_columns if col in data.columns]
+            if columns_to_drop:
+                # Create a copy without label columns
+                return data.drop(columns=columns_to_drop)
+        
+        # For dict/list data, we can't easily exclude without knowing structure
+        # In this case, the user should structure their data properly
+        # For now, return as-is (this is mainly for JSON/Graph data where labels
+        # are typically not in the same structure as features)
         return data
 
     def __len__(self) -> int:

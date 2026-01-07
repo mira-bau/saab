@@ -78,8 +78,14 @@ class JSONExtractor(StructuralExtractor):
         try:
             # Depth-first traversal with progress
             if isinstance(data, dict):
+                # Exclude top-level label keys to prevent data leakage
+                # Label keys: "label", "target", "y"
+                label_keys = ["label", "target", "y"]
+                filtered_data = {
+                    k: v for k, v in data.items() if k not in label_keys
+                }
                 position = self._extract_dict(
-                    data, tokens, position, path="", pbar=pbar
+                    filtered_data, tokens, position, path="", pbar=pbar
                 )
             elif isinstance(data, list):
                 position = self._extract_list(

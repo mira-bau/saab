@@ -1,12 +1,18 @@
 """Specs for DataLoader factory - happy path only."""
 
+import multiprocessing
+import pickle
+
+import pytest
 import torch
 
 from saab_v3.training.config import PreprocessingConfig
 from saab_v3.training.preprocessor import Preprocessor
 from saab_v3.training.dataset import StructuredDataset
-from saab_v3.training.dataloader import create_dataloader
+from saab_v3.training.dataloader import create_dataloader, CollateFunction, _worker_init_fn
 from saab_v3.data.structures import Batch
+from saab_v3.data.batcher import Batcher
+from saab_v3.data.constants import PAD_IDX
 
 
 def spec_dataloader_creation(fitted_preprocessor, sample_dataframe):
@@ -218,3 +224,330 @@ def spec_dataloader_device_consistency(fitted_preprocessor, sample_dataframe):
     if len(batches) > 1:
         for i in range(1, len(batches)):
             assert batches[i].token_ids.device == batches[0].token_ids.device
+
+
+# ============================================================================
+# Test Infrastructure Helpers
+# ============================================================================
+
+
+def _set_spawn_method():
+    """Helper to set multiprocessing start method to 'spawn' for tests."""
+    try:
+        multiprocessing.set_start_method('spawn', force=True)
+    except RuntimeError:
+        # Already set, ignore
+        pass
+
+
+def _skip_if_no_cuda():
+    """Skip test if CUDA is not available."""
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+
+
+# ============================================================================
+# Multiprocessing Tests
+# ============================================================================
+
+
+def spec_dataloader_multiprocessing_basic(fitted_preprocessor, sample_dataframe):
+    """Test DataLoader with multiprocessing (num_workers > 0) on CPU."""
+    # Arrange
+    dataset = StructuredDataset(sample_dataframe, fitted_preprocessor)
+    
+    # Act
+    dataloader = create_dataloader(dataset, batch_size=2, num_workers=2)
+    batches = [batch for batch in dataloader]
+    
+    # Assert
+    assert len(batches) > 0
+    for batch in batches:
+        assert isinstance(batch, Batch)
+        assert batch.token_ids.shape[0] <= 2  # batch_size
+        assert batch.token_ids.shape[1] > 0  # seq_len
+
+
+def spec_dataloader_multiprocessing_batch_consistency(fitted_preprocessor, sample_dataframe):
+    """Verify batches are correct with multiprocessing workers."""
+    # Arrange
+    dataset = StructuredDataset(sample_dataframe, fitted_preprocessor)
+    dataloader_single = create_dataloader(dataset, batch_size=2, num_workers=0)
+    dataloader_multi = create_dataloader(dataset, batch_size=2, num_workers=2)
+    
+    # Act
+    batches_single = [batch for batch in dataloader_single]
+    batches_multi = [batch for batch in dataloader_multi]
+    
+    # Assert
+    # Both should produce same number of batches (may be in different order)
+    assert len(batches_single) == len(batches_multi)
+    # All batches should have valid shapes
+    for batch in batches_multi:
+        assert batch.token_ids.shape[0] <= 2
+        assert batch.attention_mask.shape == batch.token_ids.shape
+        assert batch.field_ids.shape == batch.token_ids.shape
+
+
+def spec_dataloader_multiprocessing_pin_memory(fitted_preprocessor, sample_dataframe):
+    """Test pin_memory=True with multiprocessing workers."""
+    # Arrange
+    dataset = StructuredDataset(sample_dataframe, fitted_preprocessor)
+    
+    # Act
+    dataloader = create_dataloader(
+        dataset, batch_size=2, num_workers=2, pin_memory=True
+    )
+    batch = next(iter(dataloader))
+    
+    # Assert
+    assert isinstance(batch, Batch)
+    # Pin memory should work without errors (on CPU, pin_memory has no effect but shouldn't break)
+    # On GPU, tensors would be pinned, but we're testing on CPU here
+    assert batch.token_ids.shape[0] <= 2
+    assert batch.token_ids.shape[1] > 0
+
+
+def spec_dataloader_multiprocessing_persistent_workers(fitted_preprocessor, sample_dataframe):
+    """Test persistent workers across multiple epochs."""
+    # Arrange
+    dataset = StructuredDataset(sample_dataframe, fitted_preprocessor)
+    dataloader = create_dataloader(dataset, batch_size=2, num_workers=2)
+    
+    # Act - Iterate through multiple epochs
+    batches_epoch1 = [batch for batch in dataloader]
+    batches_epoch2 = [batch for batch in dataloader]
+    
+    # Assert
+    # Both epochs should produce batches (persistent workers should work)
+    assert len(batches_epoch1) > 0
+    assert len(batches_epoch2) > 0
+    # Batches should have correct shapes
+    for batch in batches_epoch1 + batches_epoch2:
+        assert isinstance(batch, Batch)
+        assert batch.token_ids.shape[0] <= 2
+
+
+def spec_dataloader_multiprocessing_prefetch(fitted_preprocessor, sample_dataframe):
+    """Test prefetch_factor works correctly with multiprocessing."""
+    # Arrange
+    dataset = StructuredDataset(sample_dataframe, fitted_preprocessor)
+    dataloader = create_dataloader(dataset, batch_size=2, num_workers=2)
+    
+    # Act
+    # Prefetch should work transparently - just verify batches are correct
+    batches = [batch for batch in dataloader]
+    
+    # Assert
+    assert len(batches) > 0
+    for batch in batches:
+        assert isinstance(batch, Batch)
+        assert batch.token_ids.shape[0] <= 2
+
+
+# ============================================================================
+# CUDA + Multiprocessing Tests
+# ============================================================================
+
+
+def spec_dataloader_cuda_multiprocessing(sample_dataframe):
+    """Test CUDA with multiprocessing (requires spawn method)."""
+    _skip_if_no_cuda()
+    _set_spawn_method()
+    
+    # Arrange
+    config = PreprocessingConfig(device="cuda", vocab_size=1000, max_seq_len=128)
+    preprocessor = Preprocessor(config)
+    preprocessor.fit(sample_dataframe)
+    dataset = StructuredDataset(sample_dataframe, preprocessor)
+    
+    # Act
+    dataloader = create_dataloader(dataset, batch_size=2, num_workers=2)
+    batches = [batch for batch in dataloader]
+    
+    # Assert
+    assert len(batches) > 0
+    for batch in batches:
+        assert isinstance(batch, Batch)
+        assert batch.token_ids.device.type == "cuda"
+        assert batch.token_ids.shape[0] <= 2
+
+
+def spec_dataloader_cuda_pin_memory(sample_dataframe):
+    """Test CUDA + pin_memory + multiprocessing."""
+    _skip_if_no_cuda()
+    _set_spawn_method()
+    
+    # Arrange
+    config = PreprocessingConfig(device="cuda", vocab_size=1000, max_seq_len=128)
+    preprocessor = Preprocessor(config)
+    preprocessor.fit(sample_dataframe)
+    dataset = StructuredDataset(sample_dataframe, preprocessor)
+    
+    # Act
+    dataloader = create_dataloader(
+        dataset, batch_size=2, num_workers=2, pin_memory=True
+    )
+    batch = next(iter(dataloader))
+    
+    # Assert
+    assert isinstance(batch, Batch)
+    assert batch.token_ids.device.type == "cuda"
+    # Pin memory should be enabled
+    assert batch.token_ids.is_pinned()
+
+
+def spec_dataloader_cuda_persistent_workers(sample_dataframe):
+    """Test CUDA + persistent workers across epochs."""
+    _skip_if_no_cuda()
+    _set_spawn_method()
+    
+    # Arrange
+    config = PreprocessingConfig(device="cuda", vocab_size=1000, max_seq_len=128)
+    preprocessor = Preprocessor(config)
+    preprocessor.fit(sample_dataframe)
+    dataset = StructuredDataset(sample_dataframe, preprocessor)
+    dataloader = create_dataloader(dataset, batch_size=2, num_workers=2)
+    
+    # Act - Multiple epochs
+    batches_epoch1 = [batch for batch in dataloader]
+    batches_epoch2 = [batch for batch in dataloader]
+    
+    # Assert
+    assert len(batches_epoch1) > 0
+    assert len(batches_epoch2) > 0
+    for batch in batches_epoch1 + batches_epoch2:
+        assert batch.token_ids.device.type == "cuda"
+
+
+# ============================================================================
+# Pickling Tests
+# ============================================================================
+
+
+def spec_dataloader_collate_picklable(fitted_preprocessor, sample_dataframe):
+    """Verify collate function can be pickled."""
+    # Arrange
+    dataset = StructuredDataset(sample_dataframe, fitted_preprocessor)
+    from saab_v3.utils.device import get_device
+    from saab_v3.data.batcher import Batcher
+    
+    device = get_device(fitted_preprocessor.config.device)
+    batcher = Batcher(
+        max_seq_len=fitted_preprocessor.config.max_seq_len,
+        pad_token_id=PAD_IDX,
+        device=device,
+    )
+    task_type = getattr(dataset, "task_type", None)
+    collate_fn = CollateFunction(batcher, task_type)
+    
+    # Act - Try to pickle
+    pickled = pickle.dumps(collate_fn)
+    unpickled = pickle.loads(pickled)
+    
+    # Assert - Should be able to unpickle and use
+    assert isinstance(unpickled, CollateFunction)
+    # Test that it still works
+    sample_item = dataset[0]
+    batch = unpickled([sample_item])
+    assert isinstance(batch, Batch)
+
+
+def spec_dataloader_batcher_picklable(fitted_preprocessor):
+    """Verify Batcher can be pickled."""
+    # Arrange
+    from saab_v3.utils.device import get_device
+    
+    device = get_device(fitted_preprocessor.config.device)
+    batcher = Batcher(
+        max_seq_len=fitted_preprocessor.config.max_seq_len,
+        pad_token_id=PAD_IDX,
+        device=device,
+    )
+    
+    # Act - Try to pickle
+    pickled = pickle.dumps(batcher)
+    unpickled = pickle.loads(pickled)
+    
+    # Assert
+    assert isinstance(unpickled, Batcher)
+    assert unpickled.max_seq_len == batcher.max_seq_len
+    assert unpickled.pad_token_id == batcher.pad_token_id
+    assert unpickled.device == batcher.device
+
+
+def spec_dataloader_worker_init_picklable():
+    """Verify worker_init_fn can be pickled."""
+    # Act - Try to pickle
+    pickled = pickle.dumps(_worker_init_fn)
+    unpickled = pickle.loads(pickled)
+    
+    # Assert - Should be able to unpickle
+    assert callable(unpickled)
+    # Test that it can be called
+    unpickled(0)  # Should not raise
+
+
+# ============================================================================
+# Edge Cases
+# ============================================================================
+
+
+def spec_dataloader_multiprocessing_empty_batch(fitted_preprocessor, sample_dataframe):
+    """Test edge case with multiprocessing and very small dataset."""
+    # Arrange - Use batch_size larger than dataset to test edge case
+    dataset = StructuredDataset(sample_dataframe, fitted_preprocessor)
+    # Create a very small dataset by taking first few items
+    small_dataset = StructuredDataset(sample_dataframe.head(1), fitted_preprocessor)
+    
+    # Act
+    dataloader = create_dataloader(small_dataset, batch_size=10, num_workers=2)
+    batches = [batch for batch in dataloader]
+    
+    # Assert
+    assert len(batches) > 0
+    for batch in batches:
+        assert isinstance(batch, Batch)
+        assert batch.token_ids.shape[0] > 0
+
+
+def spec_dataloader_multiprocessing_different_devices(fitted_preprocessor, sample_dataframe):
+    """Test device consistency with multiprocessing workers."""
+    # Arrange
+    dataset = StructuredDataset(sample_dataframe, fitted_preprocessor)
+    dataloader = create_dataloader(dataset, batch_size=2, num_workers=2)
+    
+    # Act
+    batches = [batch for batch in dataloader]
+    
+    # Assert
+    assert len(batches) > 0
+    # All batches should be on the same device
+    first_device = batches[0].token_ids.device
+    for batch in batches:
+        assert batch.token_ids.device == first_device
+        assert batch.attention_mask.device == first_device
+        assert batch.field_ids.device == first_device
+
+
+# ============================================================================
+# Backward Compatibility Tests
+# ============================================================================
+
+
+def spec_dataloader_backward_compatibility_num_workers_zero(fitted_preprocessor, sample_dataframe):
+    """Verify num_workers=0 still works (backward compatibility)."""
+    # Arrange
+    dataset = StructuredDataset(sample_dataframe, fitted_preprocessor)
+    
+    # Act
+    dataloader = create_dataloader(dataset, batch_size=2, num_workers=0)
+    batches = [batch for batch in dataloader]
+    
+    # Assert
+    assert len(batches) > 0
+    for batch in batches:
+        assert isinstance(batch, Batch)
+        assert batch.token_ids.shape[0] <= 2
+    # Verify persistent_workers is False when num_workers=0
+    assert not dataloader.persistent_workers

@@ -19,6 +19,9 @@ dependencies = [
     "scikit-learn (>=1.6.0,<2.0.0)"
 ]
 
+[project.optional-dependencies]
+tokenizers = ["tokenizers>=0.20.0"]
+
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

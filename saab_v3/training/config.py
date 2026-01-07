@@ -20,6 +20,13 @@ class PreprocessingConfig(BaseConfig):
     extractor_schema: dict | None = None  # Optional schema for extractors
     # device inherited from BaseConfig
     data_dir: Path | None = None  # Override default data/ directory (optional)
+    
+    # Text tokenization settings
+    text_fields: list[str] | None = None  # Explicit list of text field names (e.g., ["title", "content"])
+    use_text_tokenizer: bool = False  # Enable subword tokenization for text fields
+    text_tokenizer_type: str = "bpe"  # "bpe" or "wordpiece"
+    text_tokenizer_vocab_size: int = 30000  # Vocabulary size for text tokenizer
+    field_boundary_token: bool = True  # Add [FIELD_START] tokens before each field
 
     @field_validator("vocab_size")
     @classmethod
@@ -55,6 +62,22 @@ class PreprocessingConfig(BaseConfig):
             return None
         if isinstance(v, str):
             return Path(v)
+        return v
+    
+    @field_validator("text_tokenizer_type")
+    @classmethod
+    def validate_text_tokenizer_type(cls, v: str) -> str:
+        """Validate that text_tokenizer_type is valid."""
+        if v not in ["bpe", "wordpiece"]:
+            raise ValueError(f"text_tokenizer_type must be one of ['bpe', 'wordpiece'], got {v}")
+        return v
+    
+    @field_validator("text_tokenizer_vocab_size")
+    @classmethod
+    def validate_text_tokenizer_vocab_size(cls, v: int) -> int:
+        """Validate that text_tokenizer_vocab_size is positive."""
+        if v <= 0:
+            raise ValueError(f"text_tokenizer_vocab_size must be > 0, got {v}")
         return v
 
 

@@ -116,11 +116,17 @@ class GraphExtractor(StructuralExtractor):
                 node_data = data.nodes[node_id]
 
                 # Extract node attributes as fields
+                # Exclude label attributes to prevent data leakage
+                label_keys = ["label", "target", "y"]
                 if node_fields is None:
-                    # Extract all attributes
-                    attrs = node_data
+                    # Extract all attributes except label keys
+                    attrs = {
+                        k: v
+                        for k, v in node_data.items()
+                        if k not in label_keys
+                    }
                 else:
-                    # Extract only specified fields
+                    # Extract only specified fields (already excludes label keys if not in schema)
                     attrs = {k: v for k, v in node_data.items() if k in node_fields}
 
                 # Create token for node ID

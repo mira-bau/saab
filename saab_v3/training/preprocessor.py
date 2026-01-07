@@ -16,6 +16,14 @@ from saab_v3.data.vocabulary import Vocabulary
 
 from saab_v3.training.config import PreprocessingConfig
 
+# Conditional import for text tokenizer
+try:
+    from saab_v3.data.tokenizer import TokenizersBPETokenizer
+    HAS_TEXT_TOKENIZER = True
+except ImportError:
+    HAS_TEXT_TOKENIZER = False
+    TokenizersBPETokenizer = None  # type: ignore
+
 
 class Preprocessor:
     """High-level orchestrator that coordinates the preprocessing pipeline."""
@@ -27,7 +35,9 @@ class Preprocessor:
             config: PreprocessingConfig instance
         """
         self.config = config
-        self.tokenizer = ValueTokenizer(vocab_size=config.vocab_size)
+        self.tokenizer = ValueTokenizer(
+            vocab_size=config.vocab_size, text_tokenizer=None
+        )
         self.tag_encoder = TagEncoder()
 
         # Initialize extractors
@@ -127,6 +137,63 @@ class Preprocessor:
             "Supported formats: pandas DataFrame, CSV, Excel, JSON (dict/string), NetworkX Graph"
         )
 
+    def _train_text_tokenizer(
+        self, sequences: list[TokenizedSequence], text_fields: list[str]
+    ) -> None:
+        """Train BPE/WordPiece tokenizer on text field values.
+
+        Args:
+            sequences: List of TokenizedSequence objects
+            text_fields: List of field names that are text fields
+        """
+        if not HAS_TEXT_TOKENIZER or TokenizersBPETokenizer is None:
+            raise ImportError(
+                "tokenizers library is required for text tokenization. "
+                "Install with: poetry install --extras tokenizers"
+            )
+
+        try:
+            import tokenizers
+            from tokenizers import Tokenizer, models, normalizers, pre_tokenizers, trainers
+        except ImportError:
+            raise ImportError(
+                "tokenizers library is required for text tokenization. "
+                "Install with: poetry install --extras tokenizers"
+            )
+
+        # Collect all text values from text fields
+        text_values = []
+        for seq in sequences:
+            for token in seq.tokens:
+                if (
+                    token.structure_tag.field in text_fields
+                    and token.structure_tag.token_type == "text"
+                ):
+                    text_values.append(token.value)
+
+        if not text_values:
+            return  # No text values found
+
+        # Create and train BPE tokenizer
+        tokenizer = Tokenizer(models.BPE(unk_token="[UNK]"))
+        tokenizer.normalizer = normalizers.Sequence(
+            [normalizers.NFD(), normalizers.Lowercase(), normalizers.StripAccents()]
+        )
+        tokenizer.pre_tokenizer = pre_tokenizers.Whitespace()
+
+        # Train tokenizer
+        trainer = trainers.BpeTrainer(
+            vocab_size=self.config.text_tokenizer_vocab_size,
+            special_tokens=["[PAD]", "[UNK]", "[MASK]", "[CLS]", "[SEP]", "[FIELD_START]"],
+            unk_token="[UNK]",
+        )
+
+        # Convert text_values to list of strings for training
+        tokenizer.train_from_iterator(text_values, trainer=trainer)
+
+        # Wrap in our TokenizersBPETokenizer
+        self.tokenizer.text_tokenizer = TokenizersBPETokenizer(tokenizer)
+
     def fit(self, train_data: Any, schema: dict | None = None):
         """Build vocabularies from training data only.
 
@@ -148,8 +215,14 @@ class Preprocessor:
         # Auto-detect format and select extractor
         self._selected_extractor = self._auto_detect_extractor(train_data)
 
-        # Extract tokens
-        tokens = self._selected_extractor.extract(train_data, schema=schema)
+        # Extract tokens (pass text_fields if configured)
+        text_fields = self.config.text_fields
+        if isinstance(self._selected_extractor, TableExtractor):
+            tokens = self._selected_extractor.extract(
+                train_data, schema=schema, text_fields=text_fields
+            )
+        else:
+            tokens = self._selected_extractor.extract(train_data, schema=schema)
 
         if not tokens:
             raise ValueError("No tokens extracted from training data")
@@ -160,7 +233,11 @@ class Preprocessor:
         if not sequences:
             raise ValueError("No sequences created from extracted tokens")
 
-        # Build value vocabulary
+        # Train text tokenizer if enabled
+        if self.config.use_text_tokenizer and text_fields:
+            self._train_text_tokenizer(sequences, text_fields)
+
+        # Build value vocabulary (skips text tokens if text_tokenizer is enabled)
         self.tokenizer.build_vocab(sequences)
 
         # Build tag vocabularies
@@ -194,8 +271,12 @@ class Preprocessor:
             if self._is_fitted:
                 self._selected_extractor = extractor
 
-        # Extract tokens
-        tokens = extractor.extract(data, schema=schema)
+        # Extract tokens (pass text_fields if configured)
+        text_fields = self.config.text_fields
+        if isinstance(extractor, TableExtractor):
+            tokens = extractor.extract(data, schema=schema, text_fields=text_fields)
+        else:
+            tokens = extractor.extract(data, schema=schema)
 
         # Group tokens into sequences
         sequences = self._group_tokens_into_sequences(tokens)
@@ -207,11 +288,16 @@ class Preprocessor:
     ) -> list[tuple[TokenizedSequence, list[int], list[EncodedTag]]]:
         """Encode sequences using fitted vocabularies.
 
+        Handles tag expansion when text tokens produce multiple IDs.
+        Optionally adds field boundary tokens.
+
         Args:
             sequences: List of TokenizedSequence objects
 
         Returns:
             List of (TokenizedSequence, token_ids, encoded_tags) tuples
+            Note: token_ids and encoded_tags are expanded to match when
+            text tokens produce multiple IDs.
 
         Raises:
             ValueError: If not fitted yet
@@ -221,13 +307,64 @@ class Preprocessor:
                 "Preprocessor not fitted. Call fit() first to build vocabularies."
             )
 
+        from saab_v3.data.constants import FIELD_START_TOKEN
+
         encoded = []
         for seq in sequences:
-            # Encode values
-            _, token_ids = self.tokenizer.encode_sequence(seq)
+            token_ids = []
+            encoded_tags = []
+            current_field = None
 
-            # Encode tags
-            _, encoded_tags = self.tag_encoder.encode_sequence(seq)
+            for token in seq.tokens:
+                # Check if field changed (for field boundary tokens)
+                if (
+                    self.config.field_boundary_token
+                    and token.structure_tag.field is not None
+                    and token.structure_tag.field != current_field
+                ):
+                    # Add field boundary token (categorical, from vocab)
+                    # FIELD_START_TOKEN should be in vocab special tokens
+                    try:
+                        field_start_id = self.tokenizer.vocab.encode(FIELD_START_TOKEN)
+                    except (KeyError, AttributeError):
+                        # Fallback: use UNK if FIELD_START not in vocab
+                        field_start_id = self.tokenizer.vocab.encode("[UNK]")
+                    token_ids.append(field_start_id)
+                    # Create EncodedTag for field boundary with same field_idx as next token
+                    field_tag = self.tag_encoder.encode(token.structure_tag)
+                    encoded_tags.append(field_tag)
+                    current_field = token.structure_tag.field
+
+                # Encode this token
+                if (
+                    self.tokenizer.text_tokenizer is not None
+                    and token.structure_tag.token_type == "text"
+                ):
+                    # Text token: may produce multiple IDs
+                    ids = self.tokenizer.text_tokenizer.encode(token.value)
+                    token_ids.extend(ids)
+                    # Expand tag to match ID count
+                    tag = self.tag_encoder.encode(token.structure_tag)
+                    encoded_tags.extend([tag] * len(ids))
+                else:
+                    # Categorical token: single ID
+                    token_id = self.tokenizer.vocab.encode(token.value)
+                    token_ids.append(token_id)
+                    # Single tag
+                    tag = self.tag_encoder.encode(token.structure_tag)
+                    encoded_tags.append(tag)
+
+            # Truncate to max_seq_len if needed (maintain alignment)
+            max_len = self.config.max_seq_len
+            if len(token_ids) > max_len:
+                token_ids = token_ids[:max_len]
+                encoded_tags = encoded_tags[:max_len]
+
+            # Verify alignment
+            if len(token_ids) != len(encoded_tags):
+                raise ValueError(
+                    f"Token ID and tag count mismatch: {len(token_ids)} IDs vs {len(encoded_tags)} tags"
+                )
 
             # Return tuple matching Batcher expectations
             encoded.append((seq, token_ids, encoded_tags))
@@ -270,6 +407,11 @@ class Preprocessor:
         for tag_type, vocab in self.tag_encoder.tag_vocabs.items():
             tag_vocab_path = tag_vocabs_dir / f"{tag_type}.json"
             vocab.save(str(tag_vocab_path))
+
+        # Save text tokenizer if available
+        if self.tokenizer.text_tokenizer is not None:
+            text_tokenizer_path = vocab_dir / "text_tokenizer.json"
+            self.tokenizer.text_tokenizer.tok.save(str(text_tokenizer_path))
 
         # Save config
         config_path = artifacts_dir / "config.json"
@@ -341,6 +483,27 @@ class Preprocessor:
             )
 
         preprocessor.tag_encoder._is_built = True
+
+        # Load text tokenizer if available
+        text_tokenizer_path = artifacts_dir / "vocabularies" / "text_tokenizer.json"
+        if (
+            text_tokenizer_path.exists()
+            and config.use_text_tokenizer
+            and HAS_TEXT_TOKENIZER
+            and TokenizersBPETokenizer is not None
+        ):
+            try:
+                import tokenizers
+                from tokenizers import Tokenizer
+
+                tokenizer = Tokenizer.from_file(str(text_tokenizer_path))
+                preprocessor.tokenizer.text_tokenizer = TokenizersBPETokenizer(
+                    tokenizer
+                )
+            except ImportError:
+                # tokenizers not available, skip loading
+                pass
+
         preprocessor._is_fitted = True
 
         return preprocessor

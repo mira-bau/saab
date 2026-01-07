@@ -51,12 +51,15 @@ class TableExtractor(StructuralExtractor):
                 return path.exists()
         return False
 
-    def extract(self, data: Any, schema: dict | None = None) -> list[Token]:
+    def extract(
+        self, data: Any, schema: dict | None = None, text_fields: list[str] | None = None
+    ) -> list[Token]:
         """Extract tokens from table data.
 
         Args:
             data: pandas DataFrame, CSV file path, or Excel file path
             schema: Optional schema with primary_keys, foreign_keys, relationships
+            text_fields: Optional list of field names to mark as text (overrides inferred type)
 
         Returns:
             List of Token objects in row-major order
@@ -67,8 +70,24 @@ class TableExtractor(StructuralExtractor):
         if df.empty:
             raise ValueError("DataFrame is empty")
 
+        # Exclude label columns to prevent data leakage
+        # Label columns: "label", "target", "y"
+        label_columns = ["label", "target", "y"]
+        columns_to_drop = [col for col in label_columns if col in df.columns]
+        if columns_to_drop:
+            df = df.drop(columns=columns_to_drop)
+            if df.empty:
+                raise ValueError("DataFrame is empty after excluding label columns")
+
         # Pre-compute all column-level metadata
         col_token_types = {col: _infer_token_type(df[col].dtype) for col in df.columns}
+        
+        # Override token_type to "text" for explicitly marked text fields
+        if text_fields:
+            for col in df.columns:
+                if col in text_fields:
+                    col_token_types[col] = "text"
+        
         primary_keys = schema.get("primary_keys", []) if schema else []
         foreign_keys = schema.get("foreign_keys", []) if schema else []
         foreign_key_map = (

@@ -24,12 +24,16 @@ from saab_v3.utils.device import get_device
 def get_vocab_sizes(preprocessor: Preprocessor) -> dict[str, int]:
     """Extract vocabulary sizes from preprocessor.
 
+    When text tokenization is enabled, uses the text tokenizer's vocabulary size
+    instead of the categorical vocabulary size, since text tokenizer IDs are
+    what actually get passed to the model.
+
     Args:
         preprocessor: Fitted Preprocessor instance
 
     Returns:
         Dictionary with vocabulary sizes:
-        - token_vocab_size
+        - token_vocab_size (from text tokenizer if enabled, else categorical vocab)
         - token_type_vocab_size
         - field_vocab_size
         - entity_vocab_size
@@ -38,8 +42,39 @@ def get_vocab_sizes(preprocessor: Preprocessor) -> dict[str, int]:
     if not preprocessor._is_fitted:
         raise ValueError("Preprocessor must be fitted before extracting vocab sizes")
 
+    # Determine token vocabulary size
+    # If text tokenizer is enabled, use its vocab size (that's what produces the token IDs)
+    # Otherwise, use categorical vocab size
+    if preprocessor.tokenizer.text_tokenizer is not None:
+        # Get vocab size from text tokenizer
+        # The tokenizer's vocab size is stored in the tokenizer object
+        try:
+            # Try to get vocab size from the underlying tokenizer
+            text_tokenizer = preprocessor.tokenizer.text_tokenizer.tok
+            # HuggingFace tokenizers have get_vocab_size() method
+            if hasattr(text_tokenizer, "get_vocab_size"):
+                token_vocab_size = text_tokenizer.get_vocab_size()
+            elif hasattr(text_tokenizer, "get_vocab"):
+                # Fallback: get vocab dict and check size
+                vocab = text_tokenizer.get_vocab()
+                token_vocab_size = len(vocab)
+            else:
+                # Fallback: use the config value
+                token_vocab_size = preprocessor.config.text_tokenizer_vocab_size
+        except (AttributeError, TypeError) as e:
+            # Fallback to config value
+            token_vocab_size = preprocessor.config.text_tokenizer_vocab_size
+        
+        # Also need to account for categorical vocab tokens (like [FIELD_START])
+        # Use max of both to ensure all token IDs fit
+        categorical_vocab_size = len(preprocessor.tokenizer.vocab)
+        token_vocab_size = max(token_vocab_size, categorical_vocab_size)
+    else:
+        # Use categorical vocabulary size
+        token_vocab_size = len(preprocessor.tokenizer.vocab)
+
     vocab_sizes = {
-        "token_vocab_size": len(preprocessor.tokenizer.vocab),
+        "token_vocab_size": token_vocab_size,
         "token_type_vocab_size": len(preprocessor.tag_encoder.tag_vocabs["token_type"]),
         "field_vocab_size": len(preprocessor.tag_encoder.tag_vocabs["field"]),
         "entity_vocab_size": len(preprocessor.tag_encoder.tag_vocabs["entity"]),

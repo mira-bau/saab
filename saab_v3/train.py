@@ -50,7 +50,20 @@ Data Locations:
 """
 
 import argparse
+import os
+import multiprocessing
 from pathlib import Path
+
+# Set multiprocessing start method to 'spawn' for CUDA compatibility with DataLoader workers
+# This must be done before any CUDA operations or DataLoader creation
+try:
+    multiprocessing.set_start_method('spawn', force=True)
+except RuntimeError:
+    # Already set, ignore
+    pass
+
+# Set tokenizers parallelism to avoid warnings with multiprocessing
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 from saab_v3.models import (
     ModelConfig,
@@ -107,8 +120,8 @@ parser.add_argument(
 parser.add_argument(
     "--device",
     type=str,
-    required=True,
-    help="Device to use for training (e.g., 'cuda', 'cpu')",
+    default="cpu",  # Default to CPU to avoid MPS memory issues
+    help="Device to use for training (e.g., 'cuda', 'cpu', 'mps', 'auto')",
 )
 args = parser.parse_args()
 
@@ -116,7 +129,7 @@ dataset_name = args.dataset_name
 model_type = args.model_type
 resume_checkpoint = args.resume
 experiment_name = args.experiment_name or f"{dataset_name}_{model_type}"
-device = args.device
+device = args.device or "cpu"  # Fallback to CPU if not provided
 
 # ============================================================================
 # Configuration - Single Source of Truth: Pydantic Defaults
@@ -125,34 +138,42 @@ device = args.device
 print("\nUsing Pydantic defaults for configuration...")
 
 # Simple constructor calls with values
-preprocessing_config = PreprocessingConfig(
-    device=device,
-)
+# Enable text tokenization for DBpedia dataset
+if dataset_name == "dbpedia":
+    preprocessing_config = PreprocessingConfig(
+        device=device,
+        text_fields=["title", "content"],  # Mark these fields as text for subword tokenization
+        use_text_tokenizer=True,  # Enable BPE tokenizer for text fields
+        text_tokenizer_type="bpe",
+        text_tokenizer_vocab_size=30000,  # Vocabulary size for text tokenizer
+        field_boundary_token=True,  # Add [FIELD_START] tokens before each field
+        max_seq_len=256,  # Reduced for faster training
+    )
+else:
+    preprocessing_config = PreprocessingConfig(
+        device=device,
+    )
 model_config = ModelConfig(
     device=device,
-    dropout=0.2,
+    dropout=0.2,  # Increased for regularization
     num_layers=4,
     num_heads=6,
-)  # Increased for regularization
+)
 training_config = TrainingConfig(
     device=device,
-    num_epochs=None,  # Using max_steps instead
-    max_steps=10000,  # Limit to 10,000 steps for comparison
-    learning_rate=1e-6,
-    batch_size=64,
-    lr_schedule="reduce_on_plateau",
-    max_grad_norm=0.1,
+    num_epochs=5,  # Full training: 5 epochs
+    max_steps=None,  # Use epochs instead of steps
+    learning_rate=0.0002,  # Reduced from 0.0005 to prevent overfitting
+    batch_size=512,  # Increased batch size directly (no gradient accumulation needed)
+    gradient_accumulation_steps=1,  # Removed gradient accumulation for faster training
+    lr_schedule="linear_warmup_cosine",  # Warmup + cosine decay for better convergence
+    warmup_ratio=0.1,  # Warmup for 10% of training steps
+    min_lr_ratio=0.1,  # Decay to 10% of initial LR by end of training
+    max_grad_norm=1.0,  # FIXED: Increased from 0.1 (was clipping gradients by 19,000x!)
     early_stop_zero_loss_steps=100,
     early_stopping_patience=3,
     early_stopping_min_delta=0.001,
     early_stopping_metric="loss",
-    # ReduceLROnPlateau parameters
-    lr_mode="min",
-    lr_factor=0.5,
-    lr_patience=3,
-    lr_threshold=1e-4,
-    lr_min=1e-8,
-    lr_cooldown=0,
 )
 task_config = ClassificationTaskConfig(
     num_classes=14,  # Hardcoded for mydataset (14 classes)
@@ -168,6 +189,11 @@ print("Preprocessing:")
 print(f"  - vocab_size: {preprocessing_config.vocab_size}")
 print(f"  - max_seq_len: {preprocessing_config.max_seq_len}")
 print(f"  - device: {preprocessing_config.device}")
+if preprocessing_config.use_text_tokenizer:
+    print(f"  - text_fields: {preprocessing_config.text_fields}")
+    print(f"  - text_tokenizer_type: {preprocessing_config.text_tokenizer_type}")
+    print(f"  - text_tokenizer_vocab_size: {preprocessing_config.text_tokenizer_vocab_size}")
+    print(f"  - field_boundary_token: {preprocessing_config.field_boundary_token}")
 print("\nModel:")
 print(f"  - d_model: {model_config.d_model}")
 print(f"  - num_layers: {model_config.num_layers}")
@@ -236,16 +262,22 @@ val_dataset = StructuredDataset(
 
 # Create dataloaders
 print("Creating dataloaders...")
+# Enable pin_memory and num_workers for faster data loading on GPU
+is_cuda = device == "cuda" or (isinstance(device, str) and "cuda" in device.lower())
 train_loader = create_dataloader(
     train_dataset,
     batch_size=training_config.batch_size,
     shuffle=True,
+    num_workers=4,  # Use 4 worker processes for parallel data loading
+    pin_memory=is_cuda,  # Pin memory for faster CPU->GPU transfer (CUDA only)
 )
 
 val_loader = create_dataloader(
     val_dataset,
     batch_size=training_config.batch_size,
     shuffle=False,
+    num_workers=4,  # Use 4 worker processes for parallel data loading
+    pin_memory=is_cuda,  # Pin memory for faster CPU->GPU transfer (CUDA only)
 )
 
 # ============================================================================

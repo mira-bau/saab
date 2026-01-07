@@ -222,3 +222,5 @@ dataset/*/*
 !dataset/*/.gitkeep
 logs/
 checkpoints/
+analysis/
+*.zip
