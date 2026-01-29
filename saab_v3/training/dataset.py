@@ -37,6 +37,12 @@ class StructuredDataset(Dataset):
         self.split = split
         self.task_type = task_type
         self.lazy = lazy
+        
+        # Store original data path for fingerprinting (if it's a file path)
+        if isinstance(data, (str, Path)):
+            self._data_path = Path(data)
+        else:
+            self._data_path = None
 
         # Load data
         self.raw_data = self._load_data(data)

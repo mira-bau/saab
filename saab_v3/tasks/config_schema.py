@@ -11,6 +11,7 @@ class TaskName(str, Enum):
     RANKING = "ranking"
     REGRESSION = "regression"
     TOKEN_CLASSIFICATION = "token_classification"
+    MSM_FIELD = "msm_field"
 
 
 class RankingMethod(str, Enum):
@@ -63,6 +64,8 @@ def validate_task_config(config: dict[str, Any]) -> None:
         _validate_regression_params(task_params)
     elif task_name == TaskName.TOKEN_CLASSIFICATION:
         _validate_token_classification_params(task_params)
+    elif task_name == TaskName.MSM_FIELD:
+        _validate_msm_field_params(task_params)
 
 
 def _validate_classification_params(params: dict[str, Any]) -> None:
@@ -216,6 +219,47 @@ def _validate_token_classification_params(params: dict[str, Any]) -> None:
     num_labels = params["num_labels"]
     if not isinstance(num_labels, int) or num_labels <= 0:
         raise ValueError(f"num_labels must be a positive integer, got {num_labels!r}")
+
+    if "hidden_dims" in params and params["hidden_dims"] is not None:
+        if not isinstance(params["hidden_dims"], list):
+            raise ValueError(
+                f"hidden_dims must be None or a list of integers, "
+                f"got {type(params['hidden_dims']).__name__}"
+            )
+        if len(params["hidden_dims"]) == 0:
+            raise ValueError(
+                "hidden_dims must be None or a non-empty list of positive integers"
+            )
+        if not all(isinstance(d, int) and d > 0 for d in params["hidden_dims"]):
+            raise ValueError("hidden_dims must contain only positive integers")
+
+    if "dropout" in params:
+        dropout = params["dropout"]
+        if not isinstance(dropout, (int, float)) or not (0 <= dropout < 1):
+            raise ValueError(f"dropout must be in [0, 1), got {dropout!r}")
+
+
+def _validate_msm_field_params(params: dict[str, Any]) -> None:
+    """Validate MSM-Field task parameters.
+
+    Args:
+        params: MSM-Field parameters dict
+
+    Raises:
+        KeyError: If required parameters are missing
+        ValueError: If parameter values are invalid
+    """
+    if "num_fields" not in params:
+        raise KeyError("MSM-Field task requires 'num_fields' parameter")
+
+    num_fields = params["num_fields"]
+    if not isinstance(num_fields, int) or num_fields <= 0:
+        raise ValueError(f"num_fields must be a positive integer, got {num_fields!r}")
+
+    if "loss_weight" in params:
+        loss_weight = params["loss_weight"]
+        if not isinstance(loss_weight, (int, float)) or loss_weight < 0:
+            raise ValueError(f"loss_weight must be >= 0, got {loss_weight!r}")
 
     if "hidden_dims" in params and params["hidden_dims"] is not None:
         if not isinstance(params["hidden_dims"], list):

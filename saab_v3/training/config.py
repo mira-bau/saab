@@ -26,7 +26,9 @@ class PreprocessingConfig(BaseConfig):
     use_text_tokenizer: bool = False  # Enable subword tokenization for text fields
     text_tokenizer_type: str = "bpe"  # "bpe" or "wordpiece"
     text_tokenizer_vocab_size: int = 30000  # Vocabulary size for text tokenizer
+    text_tokenizer_sample_size: int = 50000  # Number of rows to sample for BPE tokenizer training
     field_boundary_token: bool = True  # Add [FIELD_START] tokens before each field
+    seed: int = 42  # Random seed for deterministic sampling
 
     @field_validator("vocab_size")
     @classmethod
@@ -79,6 +81,14 @@ class PreprocessingConfig(BaseConfig):
         if v <= 0:
             raise ValueError(f"text_tokenizer_vocab_size must be > 0, got {v}")
         return v
+    
+    @field_validator("text_tokenizer_sample_size")
+    @classmethod
+    def validate_text_tokenizer_sample_size(cls, v: int) -> int:
+        """Validate that text_tokenizer_sample_size is positive."""
+        if v <= 0:
+            raise ValueError(f"text_tokenizer_sample_size must be > 0, got {v}")
+        return v
 
 
 class TrainingConfig(BaseConfig):
@@ -119,6 +129,7 @@ class TrainingConfig(BaseConfig):
     gradient_accumulation_steps: int = 1
     max_grad_norm: float = 1.0  # Gradient clipping
     seed: int = 42  # For reproducibility
+    shuffle: bool = False  # Shuffle training data (default False for deterministic comparison)
 
     # Checkpointing
     save_dir: Path | str | None = None  # Default: checkpoints/{experiment_name}/
@@ -148,6 +159,12 @@ class TrainingConfig(BaseConfig):
     early_stopping_patience: int | None = None  # Stop if validation metric doesn't improve for N epochs
     early_stopping_min_delta: float = 0.0  # Minimum change to qualify as improvement
     early_stopping_metric: str = "loss"  # Metric to monitor for early stopping
+
+    # Subset mode for fast local experiments
+    subset_size_train: int | None = None  # Subset size for training split (default None = full dataset)
+    subset_size_val: int | None = None  # Subset size for validation split (default None = full dataset)
+    subset_size_test: int | None = None  # Subset size for test split (default None = full dataset)
+    fit_preprocessor_on_subset: bool = True  # If True and subset mode enabled, fit preprocessor on subset only (faster, good for iteration)
 
     @field_validator("optimizer_type")
     @classmethod
@@ -361,6 +378,30 @@ class TrainingConfig(BaseConfig):
         """Validate early_stopping_metric is a valid metric name."""
         if not v or not isinstance(v, str):
             raise ValueError(f"early_stopping_metric must be a non-empty string, got {v}")
+        return v
+
+    @field_validator("subset_size_train")
+    @classmethod
+    def validate_subset_size_train(cls, v: int | None) -> int | None:
+        """Validate subset_size_train is positive if provided."""
+        if v is not None and v <= 0:
+            raise ValueError(f"subset_size_train must be > 0, got {v}")
+        return v
+
+    @field_validator("subset_size_val")
+    @classmethod
+    def validate_subset_size_val(cls, v: int | None) -> int | None:
+        """Validate subset_size_val is positive if provided."""
+        if v is not None and v <= 0:
+            raise ValueError(f"subset_size_val must be > 0, got {v}")
+        return v
+
+    @field_validator("subset_size_test")
+    @classmethod
+    def validate_subset_size_test(cls, v: int | None) -> int | None:
+        """Validate subset_size_test is positive if provided."""
+        if v is not None and v <= 0:
+            raise ValueError(f"subset_size_test must be > 0, got {v}")
         return v
 
     @model_validator(mode="after")

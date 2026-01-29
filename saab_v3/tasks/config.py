@@ -265,10 +265,83 @@ class TokenClassificationTaskConfig(BaseModel):
         }
 
 
+class MSMFieldTaskConfig(BaseModel):
+    """Configuration for MSM-Field (masked field prediction) tasks.
+    
+    num_fields: Count of non-padding, non-mask field IDs (classifier output size).
+                Excludes PAD_FIELD_ID=0 and MASK_FIELD_ID.
+                This is the number of REAL field IDs that can appear in the data.
+    """
+
+    model_config = ConfigDict(validate_assignment=True, frozen=False)
+
+    num_fields: int
+    loss_weight: float = 1.0
+    mask_prob: float = 0.15
+    hidden_dims: Optional[list[int]] = None
+    dropout: float = 0.1
+
+    @field_validator("num_fields")
+    @classmethod
+    def validate_num_fields(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError(f"num_fields must be > 0, got {v}")
+        return v
+
+    @field_validator("loss_weight")
+    @classmethod
+    def validate_loss_weight(cls, v: float) -> float:
+        if not isinstance(v, (int, float)) or v < 0:
+            raise ValueError(f"loss_weight must be >= 0, got {v!r}")
+        return float(v)
+
+    @field_validator("mask_prob")
+    @classmethod
+    def validate_mask_prob(cls, v: float) -> float:
+        if not isinstance(v, (int, float)) or not (0 < v <= 1):
+            raise ValueError(f"mask_prob must be in (0, 1], got {v!r}")
+        return float(v)
+
+    @field_validator("hidden_dims")
+    @classmethod
+    def validate_hidden_dims(cls, v: Optional[list[int]]) -> Optional[list[int]]:
+        if v is not None:
+            if not isinstance(v, list):
+                raise ValueError(
+                    f"hidden_dims must be None or a list of integers, "
+                    f"got {type(v).__name__}"
+                )
+            if len(v) == 0:
+                raise ValueError(
+                    "hidden_dims must be None or a non-empty list of positive integers"
+                )
+            if not all(isinstance(d, int) and d > 0 for d in v):
+                raise ValueError("hidden_dims must contain only positive integers")
+        return v
+
+    @field_validator("dropout")
+    @classmethod
+    def validate_dropout(cls, v: float) -> float:
+        if not isinstance(v, (int, float)) or not (0 <= v < 1):
+            raise ValueError(f"dropout must be in [0, 1), got {v!r}")
+        return float(v)
+
+    def get_loss_params(self) -> dict:
+        """Get loss function parameters, excluding task head parameters.
+
+        Returns:
+            Dictionary with loss-relevant parameters: num_fields
+        """
+        return {
+            "num_fields": self.num_fields,
+        }
+
+
 # Union type for task configs
 TaskConfig = (
     ClassificationTaskConfig
     | RankingTaskConfig
     | RegressionTaskConfig
     | TokenClassificationTaskConfig
+    | MSMFieldTaskConfig
 )

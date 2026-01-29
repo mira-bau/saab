@@ -8,12 +8,13 @@ def create_loss_fn(task_type: str, **kwargs) -> nn.Module:
     """Create loss function for task type.
 
     Args:
-        task_type: Task type ("classification", "regression", "ranking", "token_classification")
+        task_type: Task type ("classification", "regression", "ranking", "token_classification", "msm_field")
         **kwargs: Task-specific parameters
             - classification: num_classes, multi_label, weight, reduction, label_smoothing, pos_weight
             - regression: reduction
             - ranking: method ("hinge", "logistic", "margin"), margin, reduction
             - token_classification: num_labels, weight, reduction, label_smoothing
+            - msm_field: num_fields, weight, reduction
 
     Returns:
         Loss function module
@@ -39,6 +40,9 @@ def create_loss_fn(task_type: str, **kwargs) -> nn.Module:
         >>>
         >>> # Token classification loss
         >>> loss_fn = create_loss_fn("token_classification", num_labels=5)
+        >>>
+        >>> # MSM-Field loss
+        >>> loss_fn = create_loss_fn("msm_field", num_fields=10)
     """
     task_type = task_type.lower()
 
@@ -50,10 +54,12 @@ def create_loss_fn(task_type: str, **kwargs) -> nn.Module:
         return create_token_classification_loss(**kwargs)
     elif task_type == "ranking":
         return create_ranking_loss(**kwargs)
+    elif task_type == "msm_field":
+        return create_msm_field_loss(**kwargs)
     else:
         raise ValueError(
             f"Unknown task_type: {task_type}. "
-            f"Supported types: 'classification', 'regression', 'token_classification', 'ranking'"
+            f"Supported types: 'classification', 'regression', 'token_classification', 'ranking', 'msm_field'"
         )
 
 
@@ -130,6 +136,29 @@ def create_token_classification_loss(
         weight=weight,
         reduction=reduction,
         label_smoothing=label_smoothing,
+    )
+
+
+def create_msm_field_loss(
+    num_fields: int | None = None,
+    weight: torch.Tensor | None = None,
+    reduction: str = "mean",
+) -> nn.Module:
+    """Create MSM-Field loss function.
+
+    Args:
+        num_fields: Number of fields (for validation)
+        weight: Optional class weights tensor
+        reduction: Reduction method ("mean", "sum", "none")
+
+    Returns:
+        CrossEntropyLoss instance with ignore_index=0 (PAD_FIELD_ID)
+    """
+    # Use ignore_index=0 to skip padding positions (PAD_FIELD_ID = 0)
+    return nn.CrossEntropyLoss(
+        weight=weight,
+        reduction=reduction,
+        ignore_index=0,  # PAD_FIELD_ID
     )
 
 

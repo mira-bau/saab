@@ -38,6 +38,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from saab_v3.data.structures import Batch
@@ -153,6 +154,23 @@ print(f"\nLoading checkpoint from {checkpoint_path}...")
 if not checkpoint_path.exists():
     raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
+# ============================================================================
+# Checkpoint Verification Diagnostics
+# ============================================================================
+print(f"\n{'=' * 60}")
+print("CHECKPOINT VERIFICATION")
+print(f"{'=' * 60}")
+print(f"Absolute checkpoint path: {checkpoint_path.resolve()}")
+print(f"Checkpoint file size: {checkpoint_path.stat().st_size / (1024*1024):.2f} MB")
+print(f"Checkpoint mtime: {datetime.fromtimestamp(checkpoint_path.stat().st_mtime).isoformat()}")
+
+# Determine if checkpoint is "best" or "last"
+checkpoint_filename = checkpoint_path.name.lower()
+is_best = "best" in checkpoint_filename
+is_latest = "latest" in checkpoint_filename or "last" in checkpoint_filename
+checkpoint_type = "best" if is_best else ("latest" if is_latest else "step-based")
+print(f"Checkpoint type: {checkpoint_type}")
+
 # Load checkpoint data
 checkpoint_data = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
 
@@ -163,6 +181,36 @@ task_config_dict = checkpoint_config.get("task", {})
 preprocessing_config_dict = checkpoint_config.get("preprocessing_config", {})
 model_type = checkpoint_config.get("model_type", "scratch")
 dataset_name_from_checkpoint = checkpoint_config.get("dataset_name", dataset_name)
+
+# Print checkpoint metadata
+print(f"\nCheckpoint Metadata:")
+print(f"  - Model type: {model_type}")
+print(f"  - Dataset name: {dataset_name_from_checkpoint}")
+if "epoch" in checkpoint_data:
+    print(f"  - Epoch: {checkpoint_data['epoch']}")
+if "step" in checkpoint_data:
+    print(f"  - Global step: {checkpoint_data['step']}")
+if "metrics" in checkpoint_data:
+    print(f"  - Metrics in checkpoint: {list(checkpoint_data['metrics'].keys())}")
+    if "loss" in checkpoint_data["metrics"]:
+        print(f"  - Checkpoint loss: {checkpoint_data['metrics']['loss']:.6f}")
+
+# Verify checkpoint matches expected model type from path
+checkpoint_dir = checkpoint_path.parent.name.lower()
+if "scratch" in checkpoint_dir and model_type != "scratch":
+    print(f"\n⚠️  WARNING: Checkpoint directory suggests 'scratch' but model_type is '{model_type}'")
+    print(f"    Checkpoint path: {checkpoint_path}")
+    print(f"    This may indicate loading the wrong checkpoint!")
+elif "saab" in checkpoint_dir and model_type != "saab":
+    print(f"\n⚠️  WARNING: Checkpoint directory suggests 'saab' but model_type is '{model_type}'")
+    print(f"    Checkpoint path: {checkpoint_path}")
+    print(f"    This may indicate loading the wrong checkpoint!")
+elif "flat" in checkpoint_dir and model_type != "flat":
+    print(f"\n⚠️  WARNING: Checkpoint directory suggests 'flat' but model_type is '{model_type}'")
+    print(f"    Checkpoint path: {checkpoint_path}")
+    print(f"    This may indicate loading the wrong checkpoint!")
+
+print(f"{'=' * 60}\n")
 
 # Use dataset name from checkpoint if available, otherwise use provided
 if dataset_name_from_checkpoint:
@@ -244,7 +292,16 @@ task_head = create_task_head_from_config(task_config, d_model=model_config.d_mod
 
 # Load task head state if available
 if checkpoint_data.get("task_head_state_dict") is not None:
-    task_head.load_state_dict(checkpoint_data["task_head_state_dict"])
+    try:
+        task_head.load_state_dict(checkpoint_data["task_head_state_dict"], strict=True)
+    except RuntimeError as e:
+        # Handle case where checkpoint was saved before LayerNorm was added
+        if "layer_norm" in str(e):
+            print("⚠️  Warning: Checkpoint missing layer_norm (likely from before LayerNorm was added)")
+            print("  Loading with strict=False (missing layer_norm will use default initialization)")
+            task_head.load_state_dict(checkpoint_data["task_head_state_dict"], strict=False)
+        else:
+            raise
 
 task_head = task_head.to(get_device(device))
 task_head.eval()
@@ -319,6 +376,12 @@ evaluator.reset()
 val_losses = []
 batch_count = 0
 
+# Collect predictions and probabilities for diagnostics (classification only)
+all_predictions_list = []
+all_labels_list = []
+all_probs_list = []
+all_outputs_list = []
+
 device_obj = get_device(device)
 
 with torch.no_grad():
@@ -350,6 +413,17 @@ with torch.no_grad():
         loss = loss_fn(outputs, batch.labels)
         val_losses.append(loss.item())
 
+        # Collect diagnostics for classification tasks
+        if task_type == "classification":
+            # Store outputs (logits) and compute probabilities
+            probs = torch.softmax(outputs, dim=-1)
+            preds = torch.argmax(outputs, dim=-1)
+            
+            all_outputs_list.append(outputs.detach().cpu())
+            all_probs_list.append(probs.detach().cpu())
+            all_predictions_list.append(preds.detach().cpu())
+            all_labels_list.append(batch.labels.detach().cpu())
+
         # Accumulate for metrics
         # Token classification needs attention_mask, others don't
         if task_type == "token_classification":
@@ -369,6 +443,80 @@ val_loss = sum(val_losses) / len(val_losses) if val_losses else 0.0
 metrics_to_compute_no_loss = [m for m in metrics_to_compute if m != "loss"]
 all_metrics = evaluator.compute_aggregated_metrics(metrics_to_compute_no_loss)
 all_metrics["loss"] = val_loss
+
+# ============================================================================
+# Prediction Diagnostics (Classification only)
+# ============================================================================
+if task_type == "classification" and all_predictions_list:
+    print(f"\n{'=' * 60}")
+    print("PREDICTION DIAGNOSTICS")
+    print(f"{'=' * 60}")
+    
+    # Concatenate all predictions and labels
+    all_predictions = torch.cat(all_predictions_list, dim=0)
+    all_labels = torch.cat(all_labels_list, dim=0)
+    all_probs = torch.cat(all_probs_list, dim=0)
+    all_outputs = torch.cat(all_outputs_list, dim=0)
+    
+    # Predictions histogram
+    unique_preds, pred_counts = torch.unique(all_predictions, return_counts=True)
+    print(f"\nPredictions histogram:")
+    for pred, count in zip(unique_preds, pred_counts):
+        print(f"  Class {pred.item()}: {count.item()} predictions ({100*count.item()/len(all_predictions):.2f}%)")
+    
+    # Labels histogram
+    unique_labels, label_counts = torch.unique(all_labels, return_counts=True)
+    print(f"\nLabels histogram:")
+    for label, count in zip(unique_labels, label_counts):
+        print(f"  Class {label.item()}: {count.item()} samples ({100*count.item()/len(all_labels):.2f}%)")
+    
+    # Probability statistics
+    top1_probs = all_probs.max(dim=-1).values
+    top1_prob_mean = top1_probs.mean().item()
+    top1_prob_min = top1_probs.min().item()
+    top1_prob_max = top1_probs.max().item()
+    print(f"\nTop-1 probability statistics:")
+    print(f"  Mean: {top1_prob_mean:.6f}")
+    print(f"  Min: {top1_prob_min:.6f}")
+    print(f"  Max: {top1_prob_max:.6f}")
+    print(f"  Std: {top1_probs.std().item():.6f}")
+    
+    # Entropy statistics
+    entropy = (-all_probs * (all_probs + 1e-12).log()).sum(dim=-1)
+    entropy_mean = entropy.mean().item()
+    max_entropy = np.log(task_config.num_classes)  # Maximum entropy for uniform distribution
+    print(f"\nPrediction entropy statistics:")
+    print(f"  Mean entropy: {entropy_mean:.6f}")
+    print(f"  Max possible entropy (uniform): {max_entropy:.6f}")
+    print(f"  Normalized entropy: {entropy_mean/max_entropy:.6f} (1.0 = uniform, 0.0 = deterministic)")
+    
+    # Number of unique predictions
+    num_unique_preds = len(unique_preds)
+    print(f"\nNumber of unique predictions: {num_unique_preds} / {task_config.num_classes} classes")
+    
+    # Check for model collapse
+    if num_unique_preds == 1:
+        collapsed_class = unique_preds[0].item()
+        print(f"\n⚠️  MODEL COLLAPSE DETECTED!")
+        print(f"  Model predicts only class {collapsed_class} for all samples.")
+        print(f"  Expected accuracy on balanced data: ~{1/task_config.num_classes:.6f} ({100/task_config.num_classes:.2f}%)")
+        print(f"  This suggests the model has not learned meaningful patterns by step {checkpoint_data.get('step', 'unknown')}.")
+    elif num_unique_preds < task_config.num_classes // 2:
+        print(f"\n⚠️  WARNING: Model predicts only {num_unique_preds} out of {task_config.num_classes} classes.")
+        print(f"  This may indicate partial collapse or insufficient training.")
+    
+    # Sample predictions (first 50)
+    num_samples = min(50, len(all_predictions))
+    print(f"\nSample predictions (first {num_samples}):")
+    print(f"  Format: (label, prediction, top1_prob)")
+    for i in range(num_samples):
+        label = all_labels[i].item()
+        pred = all_predictions[i].item()
+        prob = top1_probs[i].item()
+        match = "✓" if label == pred else "✗"
+        print(f"  [{i:3d}] {match} label={label}, pred={pred}, prob={prob:.4f}")
+    
+    print(f"{'=' * 60}\n")
 
 # ============================================================================
 # Print Results

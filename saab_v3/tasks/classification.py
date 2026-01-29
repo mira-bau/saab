@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 
 from saab_v3.tasks.base import BaseTaskHead
+from saab_v3.tasks.pooling import MeanPooling
 
 
 class ClassificationHead(BaseTaskHead):
@@ -48,6 +49,10 @@ class ClassificationHead(BaseTaskHead):
         else:
             input_dim = d_model  # Simple linear mode
 
+        # Add LayerNorm before output layer to stabilize pooled representation
+        # This prevents logits explosion and reduces saturation
+        self.layer_norm = nn.LayerNorm(input_dim)
+        
         self.output_layer = nn.Linear(input_dim, num_classes)
         
         # Initialize output layer with smaller weights to prevent extreme logits
@@ -71,12 +76,33 @@ class ClassificationHead(BaseTaskHead):
             Logits tensor of shape [batch_size, num_classes] (no activation applied).
             User should apply softmax (multi-class) or sigmoid (multi-label) as needed.
         """
+        # Assert: MeanPooling requires attention_mask
+        if isinstance(self.pooling, MeanPooling):
+            assert attention_mask is not None, (
+                "attention_mask is required when pooling='mean'. "
+                "MeanPooling needs attention_mask to exclude padding tokens."
+            )
+            assert attention_mask.ndim == 2, (
+                f"attention_mask must be 2D [B, L], got shape {attention_mask.shape}"
+            )
+            assert attention_mask.shape[0] == encoder_output.shape[0], (
+                f"attention_mask batch size {attention_mask.shape[0]} must match "
+                f"encoder_output batch size {encoder_output.shape[0]}"
+            )
+            assert attention_mask.shape[1] == encoder_output.shape[1], (
+                f"attention_mask sequence length {attention_mask.shape[1]} must match "
+                f"encoder_output sequence length {encoder_output.shape[1]}"
+            )
+        
         # Pool sequence
         seq_repr = self._pool_sequence(encoder_output, attention_mask)
 
         # Apply MLP if present
         if self.mlp is not None:
             seq_repr = self.mlp(seq_repr)
+
+        # Apply LayerNorm to stabilize representation before classifier
+        seq_repr = self.layer_norm(seq_repr)
 
         # Output layer (logits)
         logits = self.output_layer(seq_repr)

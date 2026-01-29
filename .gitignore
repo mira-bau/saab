@@ -224,3 +224,20 @@ logs/
 checkpoints/
 analysis/
 *.zip
+
+# Non-essential files for conference repo
+specs/
+tests/
+tools/
+notebooks/
+scripts/
+generate_figures.py
+parse_logs.py
+compare_scratch_saab.py
+architecture.txt
+architecture.mmd
+figure2_same_field_mass.png
+results_table.md
+results/
+logs.txt
+results_table.csv

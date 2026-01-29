@@ -94,9 +94,17 @@ class SAABAttention(nn.Module):
         batch_size, seq_len = field_ids.shape
         device = field_ids.device
 
-        # Detect padding positions (PAD_IDX = 0)
-        is_pad = field_ids == PAD_IDX  # [batch_size, seq_len]
-        pad_mask = is_pad.unsqueeze(2) | is_pad.unsqueeze(1)  # [batch_size, seq_len, seq_len]
+        # Detect padding positions using attention_mask (ground truth)
+        # NOTE: Cannot use field_ids == PAD_IDX because field_idx=0 could be a valid field index
+        # attention_mask: 1 = valid token, 0 = padding
+        if attention_mask is not None:
+            # attention_mask: [batch_size, seq_len], 1 = valid, 0 = padding
+            is_pad = attention_mask == 0  # [batch_size, seq_len]
+            pad_mask = is_pad.unsqueeze(2) | is_pad.unsqueeze(1)  # [batch_size, seq_len, seq_len]
+        else:
+            # Fallback: if no attention_mask, assume all tokens are valid
+            # This should not happen in practice, but handle gracefully
+            pad_mask = torch.zeros((batch_size, seq_len, seq_len), dtype=torch.bool, device=device)
 
         # Vectorized comparisons using broadcasting
         # unsqueeze(2): [batch_size, seq_len, 1]
@@ -137,22 +145,12 @@ class SAABAttention(nn.Module):
             same_role = role_ids.unsqueeze(2) == role_ids.unsqueeze(1)
             bias_matrix = bias_matrix + (same_role.float() * 0.5)
 
-        # Set padding positions to -inf
+        # Set padding positions to -inf (using attention_mask-based pad_mask)
         bias_matrix = bias_matrix.masked_fill(pad_mask, float("-inf"))
 
         # Normalize bias to avoid dominating QK^T scores
         if self.bias_normalization != 1.0:
             bias_matrix = bias_matrix * self.bias_normalization
-
-        # Apply attention mask: set padding positions to -inf
-        if attention_mask is not None:
-            # attention_mask: [batch_size, seq_len], 1 = valid, 0 = padding
-            # Expand to [batch_size, seq_len, seq_len]
-            mask_i = attention_mask.unsqueeze(2)  # [batch_size, seq_len, 1]
-            mask_j = attention_mask.unsqueeze(1)  # [batch_size, 1, seq_len]
-            mask_2d = mask_i * mask_j  # [batch_size, seq_len, seq_len]
-            # Set masked positions to -inf
-            bias_matrix = bias_matrix.masked_fill(mask_2d == 0, float("-inf"))
 
         return bias_matrix
 
@@ -257,11 +255,26 @@ class SAABAttention(nn.Module):
         # When lambda=0, no bias is applied - this is bitwise equivalent to standard MultiHeadAttention
 
         # Apply attention mask if provided (after bias addition)
+        # NOTE: The bias matrix already sets -inf for padding positions (both query and key).
+        # Here we only need to mask keys for the attention mask (standard practice).
+        # However, we must handle the case where all scores are -inf to prevent NaN in softmax.
         if attention_mask is not None:
             # Convert mask from [batch_size, seq_len] to [batch_size, 1, 1, seq_len]
-            mask = attention_mask.unsqueeze(1).unsqueeze(2)
+            # This masks keys: valid queries won't attend to padding keys
+            mask = attention_mask.unsqueeze(1).unsqueeze(2)  # [batch_size, 1, 1, seq_len]
             # Set masked positions to -inf
             scores = scores.masked_fill(mask == 0, float("-inf"))
+            
+            # CRITICAL: Prevent NaN in softmax when all scores are -inf for a query
+            # This can happen for padding queries (all keys masked) or edge cases
+            # Solution: If all scores are -inf, set them to 0 (softmax will produce uniform distribution)
+            all_keys_masked = (scores == float("-inf")).all(dim=-1, keepdim=True)  # [batch_size, num_heads, seq_len, 1]
+            if all_keys_masked.any():
+                # Set all -inf scores to 0 for queries with all keys masked
+                # This prevents NaN: softmax([0, 0, ..., 0]) = uniform distribution
+                # Expand all_keys_masked to match scores shape: [batch_size, num_heads, seq_len, 1] -> [batch_size, num_heads, seq_len, seq_len]
+                all_keys_masked_expanded = all_keys_masked.expand_as(scores)  # [batch_size, num_heads, seq_len, seq_len]
+                scores = scores.masked_fill(all_keys_masked_expanded, 0.0)
 
         # Softmax
         attn_weights = torch.softmax(scores, dim=-1)

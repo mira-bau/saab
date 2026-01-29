@@ -1,6 +1,6 @@
 """High-performance tag encoder with preserved symbols for SAAB."""
 
-from saab_v3.data.constants import TAG_SPECIAL_TOKENS, NONE_TOKEN
+from saab_v3.data.constants import TAG_SPECIAL_TOKENS, NONE_TOKEN, MASK_FIELD_TOKEN
 from saab_v3.data.structures import TokenizedSequence, StructureTag, EncodedTag
 from saab_v3.data.vocabulary import Vocabulary
 
@@ -9,9 +9,16 @@ class TagEncoder:
     """High-performance tag encoder with preserved symbols for SAAB."""
 
     def __init__(self):
-        """Initialize tag encoder with separate vocabularies per tag type."""
+        """Initialize tag encoder with separate vocabularies per tag type.
+        
+        Note: Field vocabulary excludes MASK_FIELD_TOKEN (it's added separately
+        as MASK_FIELD_ID in the embedding table, not in the vocab).
+        """
+        # Field vocab: exclude MASK_FIELD_TOKEN (it's not a real field, added as MASK_FIELD_ID in embedding)
+        field_special_tokens = [t for t in TAG_SPECIAL_TOKENS if t != MASK_FIELD_TOKEN]
+        
         self.tag_vocabs = {
-            "field": Vocabulary(special_tokens=TAG_SPECIAL_TOKENS),
+            "field": Vocabulary(special_tokens=field_special_tokens),
             "entity": Vocabulary(special_tokens=TAG_SPECIAL_TOKENS),
             "time": Vocabulary(special_tokens=TAG_SPECIAL_TOKENS),
             "edge": Vocabulary(special_tokens=TAG_SPECIAL_TOKENS),

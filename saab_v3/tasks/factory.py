@@ -8,6 +8,7 @@ from saab_v3.tasks.base import BaseTaskHead
 from saab_v3.tasks.classification import ClassificationHead
 from saab_v3.tasks.config import (
     ClassificationTaskConfig,
+    MSMFieldTaskConfig,
     RankingTaskConfig,
     RegressionTaskConfig,
     TaskConfig,
@@ -17,6 +18,7 @@ from saab_v3.tasks.config_schema import (
     TaskName,
     validate_task_config,
 )
+from saab_v3.tasks.msm_field import MSMFieldHead
 from saab_v3.tasks.pooling import CLSPooling, MaxPooling, MeanPooling
 from saab_v3.tasks.ranking import PairwiseRankingHead
 from saab_v3.tasks.regression import RegressionHead
@@ -83,6 +85,9 @@ def create_task_head_from_config(
     elif isinstance(task_config, TokenClassificationTaskConfig):
         task_name = TaskName.TOKEN_CLASSIFICATION
         task_params = task_config.model_dump()
+    elif isinstance(task_config, MSMFieldTaskConfig):
+        task_name = TaskName.MSM_FIELD
+        task_params = task_config.model_dump()
     else:
         valid_tasks = [t.value for t in TaskName]
         raise ValueError(
@@ -95,6 +100,7 @@ def create_task_head_from_config(
         TaskName.RANKING: _create_ranking_head,
         TaskName.REGRESSION: _create_regression_head,
         TaskName.TOKEN_CLASSIFICATION: _create_token_classification_head,
+        TaskName.MSM_FIELD: _create_msm_field_head,
     }
 
     # Create task head
@@ -124,6 +130,8 @@ def _dict_to_task_config(config: dict[str, Any]) -> TaskConfig:
         return RegressionTaskConfig(**task_params)
     elif task_name == TaskName.TOKEN_CLASSIFICATION:
         return TokenClassificationTaskConfig(**task_params)
+    elif task_name == TaskName.MSM_FIELD:
+        return MSMFieldTaskConfig(**task_params)
     else:
         valid_tasks = [t.value for t in TaskName]
         raise ValueError(f"Unknown task: {task_name!r}. Valid tasks: {valid_tasks}")
@@ -220,3 +228,20 @@ def _create_token_classification_head(
         TokenClassificationHead instance
     """
     return TokenClassificationHead(d_model=d_model, **params)
+
+
+def _create_msm_field_head(d_model: int, **params) -> MSMFieldHead:
+    """Create MSM-Field head from parameters.
+
+    Args:
+        d_model: Model dimension
+        **params: MSM-Field parameters
+
+    Returns:
+        MSMFieldHead instance
+    """
+    # Remove loss_weight and mask_prob (not used in head, only in loss computation and masking)
+    params.pop("loss_weight", None)
+    params.pop("mask_prob", None)
+    
+    return MSMFieldHead(d_model=d_model, **params)

@@ -1,7 +1,10 @@
 """Preprocessor orchestrator for the preprocessing pipeline."""
 
+import random
 from pathlib import Path
 from typing import Any
+
+import pandas as pd
 
 from saab_v3.data.extractors import (
     GraphExtractor,
@@ -137,6 +140,31 @@ class Preprocessor:
             "Supported formats: pandas DataFrame, CSV, Excel, JSON (dict/string), NetworkX Graph"
         )
 
+    def _sample_dataframe_rows(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Sample DataFrame rows deterministically for tokenizer training.
+
+        Args:
+            df: Input DataFrame
+
+        Returns:
+            Sampled DataFrame with deterministic permutation
+        """
+        N = len(df)
+        sample_size = min(self.config.text_tokenizer_sample_size, N)
+
+        # Generate indices and shuffle deterministically
+        indices = list(range(N))
+        rng = random.Random(self.config.seed)
+        rng.shuffle(indices)
+
+        # Take first sample_size indices
+        sampled_indices = indices[:sample_size]
+
+        # Print sampling info
+        print(f"[TOKENIZER SAMPLING] Total rows: {N}, Sample size: {sample_size}, Seed: {self.config.seed}")
+
+        return df.iloc[sampled_indices].reset_index(drop=True)
+
     def _train_text_tokenizer(
         self, sequences: list[TokenizedSequence], text_fields: list[str]
     ) -> None:
@@ -190,6 +218,31 @@ class Preprocessor:
 
         # Convert text_values to list of strings for training
         tokenizer.train_from_iterator(text_values, trainer=trainer)
+        
+        # Print final vocab size
+        vocab_size = tokenizer.get_vocab_size()
+        print(f"[TOKENIZER] BPE tokenizer trained, vocab_size: {vocab_size}")
+        
+        # Verify UNK token is properly set (unk_token parameter may be ignored by trainer)
+        # The UNK token should be in special_tokens, but verify it exists in the vocab
+        try:
+            unk_id = tokenizer.token_to_id("[UNK]")
+            if unk_id is None:
+                raise ValueError("UNK token not found in tokenizer vocabulary after training")
+            print(f"[TOKENIZER] UNK token verified: [UNK] -> ID {unk_id}")
+        except (AttributeError, KeyError, ValueError) as e:
+            # Try alternative UNK token names
+            for unk_name in ["<unk>", "<UNK>", "UNK"]:
+                try:
+                    unk_id = tokenizer.token_to_id(unk_name)
+                    if unk_id is not None:
+                        print(f"[TOKENIZER] WARNING: UNK token found as '{unk_name}' (ID {unk_id}), not '[UNK]'")
+                        break
+                except (AttributeError, KeyError):
+                    continue
+            else:
+                print(f"[TOKENIZER] WARNING: Could not verify UNK token in tokenizer vocabulary!")
+                print(f"[TOKENIZER] This may cause issues with unknown tokens during encoding.")
 
         # Wrap in our TokenizersBPETokenizer
         self.tokenizer.text_tokenizer = TokenizersBPETokenizer(tokenizer)
@@ -212,17 +265,32 @@ class Preprocessor:
         # Use provided schema or config schema
         schema = schema or self.config.extractor_schema
 
-        # Auto-detect format and select extractor
-        self._selected_extractor = self._auto_detect_extractor(train_data)
+        # CRITICAL: Sample DataFrame rows deterministically for tokenizer training
+        # This ensures representative class coverage across the label-sorted dataset
+        sampled_data = train_data
+        if self.config.use_text_tokenizer and self.config.text_fields:
+            # Check if train_data is a file path (CSV) or DataFrame
+            if isinstance(train_data, (str, Path)):
+                path = Path(train_data)
+                if path.suffix.lower() == ".csv":
+                    # Load CSV as DataFrame
+                    df = pd.read_csv(path)
+                    sampled_data = self._sample_dataframe_rows(df)
+            elif isinstance(train_data, pd.DataFrame):
+                # Already a DataFrame, sample it
+                sampled_data = self._sample_dataframe_rows(train_data)
+
+        # Auto-detect format and select extractor (use sampled_data if sampling occurred)
+        self._selected_extractor = self._auto_detect_extractor(sampled_data)
 
         # Extract tokens (pass text_fields if configured)
         text_fields = self.config.text_fields
         if isinstance(self._selected_extractor, TableExtractor):
             tokens = self._selected_extractor.extract(
-                train_data, schema=schema, text_fields=text_fields
+                sampled_data, schema=schema, text_fields=text_fields
             )
         else:
-            tokens = self._selected_extractor.extract(train_data, schema=schema)
+            tokens = self._selected_extractor.extract(sampled_data, schema=schema)
 
         if not tokens:
             raise ValueError("No tokens extracted from training data")
@@ -307,7 +375,7 @@ class Preprocessor:
                 "Preprocessor not fitted. Call fit() first to build vocabularies."
             )
 
-        from saab_v3.data.constants import FIELD_START_TOKEN
+        from saab_v3.data.constants import FIELD_START_TOKEN, PAD_IDX
 
         encoded = []
         for seq in sequences:

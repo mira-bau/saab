@@ -73,10 +73,21 @@ def get_vocab_sizes(preprocessor: Preprocessor) -> dict[str, int]:
         # Use categorical vocabulary size
         token_vocab_size = len(preprocessor.tokenizer.vocab)
 
+    # Task 4: Field vocab size computation
+    # field_vocab_size_raw = total vocab size (includes PAD, NONE, UNK, plus real fields)
+    # MASK_FIELD_TOKEN is NOT in the vocab (excluded in TagEncoder.__init__)
+    # field_vocab_size for embedding = field_vocab_size_raw + 1 (the +1 is MASK_FIELD_ID, which is NOT in vocab)
+    # Note: num_fields (computed in train.py) = field_vocab_size_raw (includes all field IDs, PAD handled by ignore_index)
+    #   - field_emb_size = field_vocab_size_raw + 1 (all vocab tokens + MASK_FIELD_ID)
+    #   - Therefore: field_emb_size = num_fields + 1
+    field_vocab_size_raw = len(preprocessor.tag_encoder.tag_vocabs["field"])
+    # Add exactly one +1 for MASK_FIELD_ID (which is added as last index in embedding table, not in vocab)
+    field_vocab_size = field_vocab_size_raw + 1
+    
     vocab_sizes = {
         "token_vocab_size": token_vocab_size,
         "token_type_vocab_size": len(preprocessor.tag_encoder.tag_vocabs["token_type"]),
-        "field_vocab_size": len(preprocessor.tag_encoder.tag_vocabs["field"]),
+        "field_vocab_size": field_vocab_size,  # Includes +1 for MASK_FIELD_ID
         "entity_vocab_size": len(preprocessor.tag_encoder.tag_vocabs["entity"]),
         "time_vocab_size": len(preprocessor.tag_encoder.tag_vocabs["time"]),
     }
