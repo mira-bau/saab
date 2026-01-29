@@ -482,15 +482,4 @@ For a detailed architecture diagram, see `architecture.mmd`.
 - Verify dataset format matches expected structure
 - Ensure all dependencies are installed: `poetry install`
 
-## Citation
 
-If you use this code in your research, please cite the associated paper:
-
-```bibtex
-@article{saab2024,
-  title={Structural Inductive Bias in Transformers: Learning Dynamics and Attention Behavior on Structured Inputs},
-  author={Anonymous},
-  journal={Anonymous},
-  year={2024}
-}
-```
